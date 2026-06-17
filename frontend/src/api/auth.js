@@ -43,3 +43,7 @@ export const markReadApi = (id) => {
 export const markAllReadApi = () => {
   return request.post('/api/user/notifications/read-all')
 }
+
+export const getTeamMembersApi = (teamId) => {
+  return request.get(`/api/teams/${teamId}/members`)
+}

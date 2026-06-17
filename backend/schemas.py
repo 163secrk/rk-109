@@ -41,7 +41,7 @@ MENU_CONFIG = {
         "name": "项目管理",
         "icon": "ClipboardOutline",
         "children": [
-            {"key": "project.kanban", "name": "看板", "path": "/project/kanban"},
+            {"key": "project.kanban", "name": "项目看板", "path": "/project/kanban"},
             {"key": "project.gantt", "name": "甘特图", "path": "/project/gantt"},
             {"key": "project.templates", "name": "模板", "path": "/project/templates"},
         ],
@@ -176,3 +176,124 @@ class NotificationItem(BaseModel):
 
 class SwitchTeamRequest(BaseModel):
     team_id: int
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str = ""
+    cover_color: str = "#2563eb"
+    member_ids: List[int] = []
+
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    cover_color: Optional[str] = None
+    member_ids: Optional[List[int]] = None
+
+
+class ProjectMemberInfo(BaseModel):
+    id: int
+    user: UserInfo
+    joined_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectInfo(BaseModel):
+    id: int
+    name: str
+    description: str
+    cover_color: str
+    created_by: int
+    created_at: datetime
+    updated_at: datetime
+    project_members: List[ProjectMemberInfo] = []
+
+    class Config:
+        from_attributes = True
+
+
+class TaskCreate(BaseModel):
+    project_id: int
+    title: str = Field(..., min_length=1, max_length=255)
+    description: str = ""
+    priority: str = "medium"
+    assignee_id: Optional[int] = None
+    due_date: Optional[datetime] = None
+
+
+class TaskUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    assignee_id: Optional[int] = None
+    due_date: Optional[datetime] = None
+
+
+class TaskCommentCreate(BaseModel):
+    content: str = Field(..., min_length=1)
+    mentions: str = ""
+
+
+class TaskInfo(BaseModel):
+    id: int
+    project_id: int
+    title: str
+    description: str
+    status: str
+    priority: str
+    assignee: Optional[UserInfo] = None
+    creator: UserInfo
+    due_date: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TaskCommentInfo(BaseModel):
+    id: int
+    task_id: int
+    user: UserInfo
+    content: str
+    mentions: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TaskActivityInfo(BaseModel):
+    id: int
+    task_id: int
+    user: UserInfo
+    action: str
+    detail: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TaskAttachmentInfo(BaseModel):
+    id: int
+    task_id: int
+    user: UserInfo
+    file_name: str
+    file_path: str
+    file_size: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TaskDetailInfo(BaseModel):
+    task: TaskInfo
+    comments: List[TaskCommentInfo] = []
+    activities: List[TaskActivityInfo] = []
+    attachments: List[TaskAttachmentInfo] = []

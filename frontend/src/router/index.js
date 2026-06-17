@@ -36,7 +36,13 @@ const routes = [
         path: 'project/kanban',
         name: 'ProjectKanban',
         component: () => import('../views/project/Kanban.vue'),
-        meta: { title: '看板 - 知汇', breadcrumb: ['项目管理', '看板'] },
+        meta: { title: '项目看板 - 知汇', breadcrumb: ['项目管理', '项目看板'] },
+      },
+      {
+        path: 'project/kanban/:projectId',
+        name: 'ProjectKanbanDetail',
+        component: () => import('../views/project/KanbanDetail.vue'),
+        meta: { title: '看板详情 - 知汇', breadcrumb: ['项目管理', '项目看板', '看板详情'] },
       },
       {
         path: 'project/gantt',
