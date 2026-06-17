@@ -39,7 +39,7 @@ MENU_CONFIG = {
     "project": {
         "key": "project",
         "name": "项目管理",
-        "icon": "ClipboardListOutlined",
+        "icon": "ClipboardOutline",
         "children": [
             {"key": "project.kanban", "name": "看板", "path": "/project/kanban"},
             {"key": "project.gantt", "name": "甘特图", "path": "/project/gantt"},

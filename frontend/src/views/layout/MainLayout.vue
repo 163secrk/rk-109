@@ -57,7 +57,6 @@
             trigger="click"
             placement="bottom-end"
             :show-arrow="false"
-            trigger="click"
           >
             <template #trigger>
               <n-badge :value="userStore.unreadCount" :max="99" :show-zero="false">
@@ -131,7 +130,7 @@ import { useApi } from '../../utils/request'
 import { getNotificationsApi, markReadApi, markAllReadApi } from '../../api/auth'
 import {
   DashboardOutlined,
-  ClipboardListOutlined,
+  ClipboardOutline,
   DocOutline,
   PeopleOutline,
   BarChartOutline,
@@ -152,22 +151,23 @@ const collapsed = ref(false)
 const activeMenu = ref('workspace.quadrant')
 const notifications = ref([])
 
-const iconMap = {
-  DashboardOutlined,
-  ClipboardListOutlined,
-  DocOutline,
-  PeopleOutline,
-  BarChartOutline,
-  SettingsOutline,
+const currentTeam = computed(() => userStore.currentTeam)
+const currentRole = computed(() => userStore.currentRole)
+
+const iconNameMap = {
+  'DashboardOutlined': DashboardOutlined,
+  'ClipboardListOutlined': ClipboardOutline,
+  'ClipboardOutline': ClipboardOutline,
+  'DocOutline': DocOutline,
+  'PeopleOutline': PeopleOutline,
+  'BarChartOutline': BarChartOutline,
+  'SettingsOutline': SettingsOutline,
 }
 
 const renderIcon = (iconName) => {
-  const icon = iconMap[iconName]
+  const icon = iconNameMap[iconName]
   return () => h(NIcon, null, { default: () => h(icon) })
 }
-
-const currentTeam = computed(() => userStore.currentTeam)
-const currentRole = computed(() => userStore.currentRole)
 
 const menuOptions = computed(() => {
   return userStore.menus.map((menu) => ({
