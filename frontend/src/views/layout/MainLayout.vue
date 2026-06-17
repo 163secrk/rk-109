@@ -129,9 +129,9 @@ import { useUserStore } from '../../stores/user'
 import { useApi } from '../../utils/request'
 import { getNotificationsApi, markReadApi, markAllReadApi } from '../../api/auth'
 import {
-  DashboardOutlined,
+  GridOutline as DashboardOutlined,
   ClipboardOutline,
-  DocOutline,
+  DocumentOutline as DocOutline,
   PeopleOutline,
   BarChartOutline,
   SettingsOutline,
