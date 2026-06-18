@@ -1,8 +1,11 @@
+import os
+import uuid
 from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
 
+from config import settings
 from database import get_db
 import models
 import schemas
@@ -375,3 +378,105 @@ def add_comment(
     _create_activity(db, task.id, current_user.id, "comment", "添加了评论")
 
     return schemas.TaskCommentInfo.model_validate(comment)
+
+
+@router.post("/tasks/{task_id}/attachments", response_model=schemas.TaskAttachmentInfo, dependencies=[Depends(require_project)])
+async def upload_attachment(
+    task_id: int,
+    file: UploadFile = File(...),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    task = (
+        db.query(models.Task)
+        .options(joinedload(models.Task.assignee), joinedload(models.Task.creator))
+        .filter(models.Task.id == task_id)
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    project = db.query(models.Project).filter(models.Project.id == task.project_id).first()
+    team_id = _get_current_team_id(current_user, db)
+    if project.team_id != team_id:
+        raise HTTPException(status_code=403, detail="无权访问该任务")
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+
+    ext = os.path.splitext(file.filename)[1]
+    unique_name = f"{uuid.uuid4().hex}{ext}"
+    task_dir = os.path.join(settings.UPLOAD_DIR, "tasks", str(task_id))
+    os.makedirs(task_dir, exist_ok=True)
+    file_path = os.path.join(task_dir, unique_name)
+
+    file_size = 0
+    with open(file_path, "wb") as buffer:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            file_size += len(chunk)
+            if file_size > settings.MAX_UPLOAD_SIZE:
+                buffer.close()
+                os.remove(file_path)
+                raise HTTPException(status_code=400, detail=f"文件大小超过限制 ({settings.MAX_UPLOAD_SIZE // 1024 // 1024}MB)")
+            buffer.write(chunk)
+
+    relative_path = f"tasks/{task_id}/{unique_name}"
+    attachment = models.TaskAttachment(
+        task_id=task_id,
+        user_id=current_user.id,
+        file_name=file.filename,
+        file_path=relative_path,
+        file_size=file_size,
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+
+    _create_activity(db, task.id, current_user.id, "upload", f"上传了附件：{file.filename}")
+
+    return schemas.TaskAttachmentInfo.model_validate(attachment)
+
+
+@router.delete("/tasks/{task_id}/attachments/{attachment_id}", dependencies=[Depends(require_project)])
+def delete_attachment(
+    task_id: int,
+    attachment_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    task = db.query(models.Task).filter(models.Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    project = db.query(models.Project).filter(models.Project.id == task.project_id).first()
+    team_id = _get_current_team_id(current_user, db)
+    if project.team_id != team_id:
+        raise HTTPException(status_code=403, detail="无权访问该任务")
+
+    attachment = (
+        db.query(models.TaskAttachment)
+        .filter(
+            models.TaskAttachment.id == attachment_id,
+            models.TaskAttachment.task_id == task_id,
+        )
+        .first()
+    )
+    if not attachment:
+        raise HTTPException(status_code=404, detail="附件不存在")
+
+    file_full_path = os.path.join(settings.UPLOAD_DIR, attachment.file_path)
+    if os.path.exists(file_full_path):
+        try:
+            os.remove(file_full_path)
+        except OSError:
+            pass
+
+    db.delete(attachment)
+    db.commit()
+
+    _create_activity(db, task.id, current_user.id, "delete_attachment", f"删除了附件：{attachment.file_name}")
+
+    return {"status": "ok", "message": "已删除"}

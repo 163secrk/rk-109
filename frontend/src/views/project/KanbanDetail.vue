@@ -260,7 +260,90 @@
               </div>
             </n-tab-pane>
             <n-tab-pane name="attachments" tab="附件">
-              <n-empty description="附件上传功能暂未实现" style="padding: 40px 0" />
+              <div class="attachment-section">
+                <div
+                  class="upload-dropzone"
+                  :class="{ 'drag-over': isDragOver }"
+                  @click="triggerFileInput"
+                  @dragover.prevent="isDragOver = true"
+                  @dragleave="isDragOver = false"
+                  @drop.prevent="handleAttachmentDrop"
+                >
+                  <n-icon size="40" color="#94a3b8"><CloudUploadOutline /></n-icon>
+                  <div class="upload-text">点击或拖拽文件到此处上传</div>
+                  <div class="upload-hint">支持单个文件最大 50MB，支持多个附件同时添加</div>
+                  <input
+                    ref="fileInputRef"
+                    type="file"
+                    style="display: none"
+                    multiple
+                    @change="handleFileSelect"
+                  />
+                </div>
+
+                <div v-if="uploadingFiles.length > 0" class="uploading-list">
+                  <div v-for="item in uploadingFiles" :key="item.id" class="uploading-item">
+                    <div class="uploading-info">
+                      <n-icon size="18" color="#2563eb"><DocumentOutline /></n-icon>
+                      <span class="uploading-name">{{ item.file.name }}</span>
+                      <span class="uploading-size">{{ formatFileSize(item.file.size) }}</span>
+                    </div>
+                    <div class="uploading-progress">
+                      <n-progress
+                        type="line"
+                        :percentage="item.progress"
+                        :show-indicator="true"
+                        :height="6"
+                        :status="item.progress >= 100 ? 'success' : 'default'"
+                      />
+                    </div>
+                    <n-button
+                      v-if="item.progress < 100"
+                      text
+                      size="small"
+                      type="error"
+                      @click="cancelUpload(item.id)"
+                    >
+                      取消
+                    </n-button>
+                  </div>
+                </div>
+
+                <n-divider v-if="currentTaskDetail.attachments.length > 0 && (uploadingFiles.length > 0)" />
+
+                <div v-if="currentTaskDetail.attachments.length > 0" class="attachment-list">
+                  <div
+                    v-for="att in currentTaskDetail.attachments"
+                    :key="att.id"
+                    class="attachment-item"
+                  >
+                    <div class="attachment-icon" :style="{ backgroundColor: getFileIconBg(att.file_name) }">
+                      <n-icon size="20" color="#fff">
+                        <component :is="getFileIcon(att.file_name)" />
+                      </n-icon>
+                    </div>
+                    <div class="attachment-info" @click="downloadAttachment(att)">
+                      <div class="attachment-name">{{ att.file_name }}</div>
+                      <div class="attachment-meta">
+                        <span>{{ formatFileSize(att.file_size) }}</span>
+                        <span>·</span>
+                        <span>{{ att.user.name }} 上传</span>
+                        <span>·</span>
+                        <span>{{ formatTime(att.created_at) }}</span>
+                      </div>
+                    </div>
+                    <n-button
+                      text
+                      size="small"
+                      type="error"
+                      :loading="deletingAttachmentId === att.id"
+                      @click="handleDeleteAttachment(att)"
+                    >
+                      删除
+                    </n-button>
+                  </div>
+                </div>
+              </div>
             </n-tab-pane>
           </n-tabs>
         </div>
@@ -281,19 +364,27 @@ import {
   getTaskApi,
   updateTaskApi,
   addTaskCommentApi,
+  uploadTaskAttachmentApi,
+  deleteTaskAttachmentApi,
 } from '../../api/project'
 import { getTeamMembersApi } from '../../api/auth'
 import {
   AddOutline,
   ArrowBackOutline,
   CalendarOutline,
+  CloudUploadOutline,
+  DocumentOutline,
+  ImageOutline,
+  VideocamOutline,
+  MusicalNotesOutline,
+  ArchiveOutline,
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
-const { message, handleError } = useApi()
+const { message, handleError, dialog } = useApi()
 
 const projects = ref([])
 const tasks = ref([])
@@ -309,6 +400,12 @@ const currentTaskDetail = ref(null)
 const commentContent = ref('')
 const dragOverCol = ref(null)
 const draggingTask = ref(null)
+const fileInputRef = ref(null)
+const isDragOver = ref(false)
+const uploadingFiles = ref([])
+const deletingAttachmentId = ref(null)
+const uploadIdCounter = ref(0)
+const pendingUploads = new Map()
 
 const columns = [
   { key: 'todo', label: '待办', color: '#94a3b8' },
@@ -424,8 +521,53 @@ const activityType = (action) => {
     create: 'success',
     update: 'info',
     comment: 'warning',
+    upload: 'success',
+    delete_attachment: 'error',
   }
   return map[action] || 'default'
+}
+
+const formatFileSize = (bytes) => {
+  if (!bytes) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let size = bytes
+  let unitIndex = 0
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex++
+  }
+  return `${size.toFixed(size < 10 && unitIndex > 0 ? 1 : 0)} ${units[unitIndex]}`
+}
+
+const getFileExt = (filename) => {
+  const idx = filename.lastIndexOf('.')
+  return idx >= 0 ? filename.substring(idx + 1).toLowerCase() : ''
+}
+
+const getFileIcon = (filename) => {
+  const ext = getFileExt(filename)
+  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico']
+  const videoExts = ['mp4', 'avi', 'mov', 'wmv', 'mkv', 'flv', 'webm']
+  const audioExts = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a']
+  const archiveExts = ['zip', 'rar', '7z', 'tar', 'gz', 'bz2']
+  if (imageExts.includes(ext)) return ImageOutline
+  if (videoExts.includes(ext)) return VideocamOutline
+  if (audioExts.includes(ext)) return MusicalNotesOutline
+  if (archiveExts.includes(ext)) return ArchiveOutline
+  return DocumentOutline
+}
+
+const getFileIconBg = (filename) => {
+  const ext = getFileExt(filename)
+  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico']
+  const videoExts = ['mp4', 'avi', 'mov', 'wmv', 'mkv', 'flv', 'webm']
+  const audioExts = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a']
+  const archiveExts = ['zip', 'rar', '7z', 'tar', 'gz', 'bz2']
+  if (imageExts.includes(ext)) return '#f97316'
+  if (videoExts.includes(ext)) return '#8b5cf6'
+  if (audioExts.includes(ext)) return '#10b981'
+  if (archiveExts.includes(ext)) return '#f59e0b'
+  return '#3b82f6'
 }
 
 const goBack = () => {
@@ -586,6 +728,116 @@ const handleDrop = async (colKey) => {
     dragOverCol.value = null
     draggingTask.value = null
   }
+}
+
+const triggerFileInput = () => {
+  fileInputRef.value?.click()
+}
+
+const handleFileSelect = (e) => {
+  const files = Array.from(e.target.files || [])
+  if (files.length > 0) {
+    startUploadFiles(files)
+  }
+  if (fileInputRef.value) {
+    fileInputRef.value.value = ''
+  }
+}
+
+const handleAttachmentDrop = (e) => {
+  isDragOver.value = false
+  const files = Array.from(e.dataTransfer?.files || [])
+  if (files.length > 0) {
+    startUploadFiles(files)
+  }
+}
+
+const startUploadFiles = (files) => {
+  if (!currentTaskDetail.value) {
+    message.error('请先选择任务')
+    return
+  }
+  const maxSize = 50 * 1024 * 1024
+  files.forEach((file) => {
+    if (file.size > maxSize) {
+      message.error(`文件 ${file.name} 超过 50MB 限制`)
+      return
+    }
+    startSingleUpload(file)
+  })
+}
+
+const startSingleUpload = async (file) => {
+  const uploadId = ++uploadIdCounter.value
+  const uploadItem = {
+    id: uploadId,
+    file,
+    progress: 0,
+    cancelled: false,
+  }
+  uploadingFiles.value.push(uploadItem)
+
+  try {
+    const taskId = currentTaskDetail.value.task.id
+    const res = await uploadTaskAttachmentApi(taskId, file, (percent) => {
+      if (!uploadItem.cancelled) {
+        uploadItem.progress = percent
+      }
+    })
+    uploadItem.progress = 100
+    message.success(`文件 ${file.name} 上传成功`)
+    setTimeout(() => {
+      uploadingFiles.value = uploadingFiles.value.filter((f) => f.id !== uploadId)
+    }, 800)
+    const detail = await getTaskApi(taskId)
+    currentTaskDetail.value = detail
+  } catch (e) {
+    if (!uploadItem.cancelled) {
+      handleError(e, `文件 ${file.name} 上传失败`)
+    }
+    uploadingFiles.value = uploadingFiles.value.filter((f) => f.id !== uploadId)
+  }
+}
+
+const cancelUpload = (uploadId) => {
+  const item = uploadingFiles.value.find((f) => f.id === uploadId)
+  if (item) {
+    item.cancelled = true
+    uploadingFiles.value = uploadingFiles.value.filter((f) => f.id !== uploadId)
+  }
+}
+
+const downloadAttachment = (att) => {
+  const url = `/uploads/${att.file_path}`
+  const a = document.createElement('a')
+  a.href = url
+  a.download = att.file_name
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
+
+const handleDeleteAttachment = (att) => {
+  if (!currentTaskDetail.value) return
+  dialog.warning({
+    title: '确认删除',
+    content: `确定要删除附件 "${att.file_name}" 吗？`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      deletingAttachmentId.value = att.id
+      try {
+        await deleteTaskAttachmentApi(currentTaskDetail.value.task.id, att.id)
+        message.success('删除成功')
+        const res = await getTaskApi(currentTaskDetail.value.task.id)
+        currentTaskDetail.value = res
+      } catch (e) {
+        handleError(e, '删除失败')
+      } finally {
+        deletingAttachmentId.value = null
+      }
+    },
+  })
 }
 
 onMounted(async () => {
@@ -841,6 +1093,140 @@ watch(
       line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-word;
+    }
+  }
+}
+
+.attachment-section {
+  .upload-dropzone {
+    border: 2px dashed #cbd5e1;
+    border-radius: 12px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: #fafbfc;
+
+    &:hover,
+    &.drag-over {
+      border-color: #2563eb;
+      background: #eff6ff;
+    }
+
+    .upload-text {
+      font-size: 15px;
+      font-weight: 500;
+      color: #1f2937;
+      margin-top: 12px;
+    }
+
+    .upload-hint {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-top: 6px;
+    }
+  }
+
+  .uploading-list {
+    margin-top: 16px;
+
+    .uploading-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      background: #f8fafc;
+      border-radius: 8px;
+      margin-bottom: 8px;
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+
+    .uploading-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+
+      .uploading-name {
+        font-size: 13px;
+        font-weight: 500;
+        color: #1f2937;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 200px;
+      }
+
+      .uploading-size {
+        font-size: 12px;
+        color: #94a3b8;
+        flex-shrink: 0;
+      }
+    }
+
+    .uploading-progress {
+      width: 140px;
+      flex-shrink: 0;
+    }
+  }
+
+  .attachment-list {
+    margin-top: 8px;
+
+    .attachment-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border-radius: 8px;
+      transition: background 0.2s;
+      margin-bottom: 4px;
+
+      &:hover {
+        background: #f8fafc;
+      }
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+
+    .attachment-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .attachment-info {
+      flex: 1;
+      min-width: 0;
+      cursor: pointer;
+
+      .attachment-name {
+        font-size: 14px;
+        font-weight: 500;
+        color: #1f2937;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        margin-bottom: 4px;
+      }
+
+      .attachment-meta {
+        font-size: 12px;
+        color: #94a3b8;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
     }
   }
 }

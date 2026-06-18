@@ -35,6 +35,19 @@ request.interceptors.response.use(
   }
 )
 
+export const uploadWithProgress = (url, formData, onProgress) => {
+  const token = localStorage.getItem('zhihui_token')
+  return request.post(url, formData, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    onUploadProgress: (progressEvent) => {
+      if (onProgress && progressEvent.total) {
+        const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+        onProgress(percent, progressEvent.loaded, progressEvent.total)
+      }
+    },
+  })
+}
+
 export const useApi = () => {
   const message = useMessage()
   const dialog = useDialog()

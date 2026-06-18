@@ -1,5 +1,7 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
 from config import settings
@@ -10,6 +12,9 @@ from routers import auth, user, teams, workspace, project, document, team_commun
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    task_upload_dir = os.path.join(settings.UPLOAD_DIR, "tasks")
+    os.makedirs(task_upload_dir, exist_ok=True)
     yield
 
 
@@ -46,6 +51,8 @@ app.include_router(project.router)
 app.include_router(document.router)
 app.include_router(team_communication.router)
 app.include_router(others.router)
+
+app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
 
 if __name__ == "__main__":

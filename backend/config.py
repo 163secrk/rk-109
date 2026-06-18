@@ -1,3 +1,4 @@
+import os
 from pydantic_settings import BaseSettings
 
 
@@ -13,6 +14,9 @@ class Settings(BaseSettings):
 
     BACKEND_PORT: int = 8109
     FRONTEND_PORT: int = 3109
+
+    UPLOAD_DIR: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
+    MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024
 
     class Config:
         env_file = ".env"

@@ -1,4 +1,4 @@
-import request from '../utils/request'
+import request, { uploadWithProgress } from '../utils/request'
 
 export const listProjectsApi = () => {
   return request.get('/api/project/projects')
@@ -38,4 +38,14 @@ export const updateTaskApi = (taskId, data) => {
 
 export const addTaskCommentApi = (taskId, data) => {
   return request.post(`/api/project/tasks/${taskId}/comments`, data)
+}
+
+export const uploadTaskAttachmentApi = (taskId, file, onProgress) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return uploadWithProgress(`/api/project/tasks/${taskId}/attachments`, formData, onProgress)
+}
+
+export const deleteTaskAttachmentApi = (taskId, attachmentId) => {
+  return request.delete(`/api/project/tasks/${taskId}/attachments/${attachmentId}`)
 }
