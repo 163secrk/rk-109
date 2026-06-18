@@ -49,3 +49,12 @@ export const uploadTaskAttachmentApi = (taskId, file, onProgress) => {
 export const deleteTaskAttachmentApi = (taskId, attachmentId) => {
   return request.delete(`/api/project/tasks/${taskId}/attachments/${attachmentId}`)
 }
+
+export const listMyTasksApi = (status) => {
+  const params = status ? { status } : {}
+  return request.get('/api/project/my-tasks', { params })
+}
+
+export const createPersonalTaskApi = (data) => {
+  return request.post('/api/project/personal-tasks', data)
+}

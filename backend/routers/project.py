@@ -190,7 +190,11 @@ def list_tasks(
 
     tasks = (
         db.query(models.Task)
-        .options(joinedload(models.Task.assignee), joinedload(models.Task.creator))
+        .options(
+            joinedload(models.Task.assignee),
+            joinedload(models.Task.creator),
+            joinedload(models.Task.project),
+        )
         .filter(models.Task.project_id == project_id)
         .all()
     )
@@ -203,21 +207,25 @@ def create_task(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    project = db.query(models.Project).filter(models.Project.id == data.project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
-
     team_id = _get_current_team_id(current_user, db)
-    if project.team_id != team_id:
-        raise HTTPException(status_code=403, detail="无权访问该项目")
+
+    if data.project_id:
+        project = db.query(models.Project).filter(models.Project.id == data.project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="项目不存在")
+        if project.team_id != team_id:
+            raise HTTPException(status_code=403, detail="无权访问该项目")
 
     task = models.Task(
         project_id=data.project_id,
+        team_id=team_id,
         title=data.title,
         description=data.description,
         status="todo",
         priority=data.priority,
-        assignee_id=data.assignee_id,
+        urgency=data.urgency,
+        importance=data.importance,
+        assignee_id=data.assignee_id or current_user.id,
         creator_id=current_user.id,
         due_date=data.due_date,
     )
@@ -229,14 +237,92 @@ def create_task(
 
     task = (
         db.query(models.Task)
-        .options(joinedload(models.Task.assignee), joinedload(models.Task.creator))
+        .options(
+            joinedload(models.Task.assignee),
+            joinedload(models.Task.creator),
+            joinedload(models.Task.project),
+        )
         .filter(models.Task.id == task.id)
         .first()
     )
     return schemas.TaskInfo.model_validate(task)
 
 
-@router.get("/tasks/{task_id}", response_model=schemas.TaskDetailInfo, dependencies=[Depends(require_project)])
+@router.get("/my-tasks", response_model=List[schemas.TaskInfo])
+def list_my_tasks(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    status: Optional[str] = Query(None),
+):
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    query = (
+        db.query(models.Task)
+        .options(
+            joinedload(models.Task.assignee),
+            joinedload(models.Task.creator),
+            joinedload(models.Task.project),
+        )
+        .filter(
+            models.Task.team_id == team_id,
+            models.Task.assignee_id == current_user.id,
+        )
+    )
+
+    if status:
+        query = query.filter(models.Task.status == status)
+    else:
+        query = query.filter(models.Task.status != "done")
+
+    tasks = query.order_by(models.Task.created_at.desc()).all()
+    return [schemas.TaskInfo.model_validate(t) for t in tasks]
+
+
+@router.post("/personal-tasks", response_model=schemas.TaskInfo)
+def create_personal_task(
+    data: schemas.PersonalTaskCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    task = models.Task(
+        project_id=None,
+        team_id=team_id,
+        title=data.title,
+        description=data.description,
+        status="todo",
+        priority=data.priority,
+        urgency=data.urgency,
+        importance=data.importance,
+        assignee_id=current_user.id,
+        creator_id=current_user.id,
+        due_date=data.due_date,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    _create_activity(db, task.id, current_user.id, "create", f"创建了个人任务")
+
+    task = (
+        db.query(models.Task)
+        .options(
+            joinedload(models.Task.assignee),
+            joinedload(models.Task.creator),
+            joinedload(models.Task.project),
+        )
+        .filter(models.Task.id == task.id)
+        .first()
+    )
+    return schemas.TaskInfo.model_validate(task)
+
+
+@router.get("/tasks/{task_id}", response_model=schemas.TaskDetailInfo)
 def get_task(
     task_id: int,
     current_user: models.User = Depends(get_current_user),
@@ -244,16 +330,19 @@ def get_task(
 ):
     task = (
         db.query(models.Task)
-        .options(joinedload(models.Task.assignee), joinedload(models.Task.creator))
+        .options(
+            joinedload(models.Task.assignee),
+            joinedload(models.Task.creator),
+            joinedload(models.Task.project),
+        )
         .filter(models.Task.id == task_id)
         .first()
     )
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    project = db.query(models.Project).filter(models.Project.id == task.project_id).first()
     team_id = _get_current_team_id(current_user, db)
-    if project.team_id != team_id:
+    if task.team_id != team_id:
         raise HTTPException(status_code=403, detail="无权访问该任务")
 
     comments = (
@@ -283,7 +372,7 @@ def get_task(
     )
 
 
-@router.put("/tasks/{task_id}", response_model=schemas.TaskInfo, dependencies=[Depends(require_project)])
+@router.put("/tasks/{task_id}", response_model=schemas.TaskInfo)
 def update_task(
     task_id: int,
     data: schemas.TaskUpdate,
@@ -292,19 +381,23 @@ def update_task(
 ):
     task = (
         db.query(models.Task)
-        .options(joinedload(models.Task.assignee), joinedload(models.Task.creator))
+        .options(
+            joinedload(models.Task.assignee),
+            joinedload(models.Task.creator),
+            joinedload(models.Task.project),
+        )
         .filter(models.Task.id == task_id)
         .first()
     )
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    project = db.query(models.Project).filter(models.Project.id == task.project_id).first()
     team_id = _get_current_team_id(current_user, db)
-    if project.team_id != team_id:
+    if task.team_id != team_id:
         raise HTTPException(status_code=403, detail="无权访问该任务")
 
     changed = []
+    level_map = {"high": "高", "medium": "中", "low": "低"}
     if data.title is not None and data.title != task.title:
         task.title = data.title
         changed.append("标题")
@@ -318,11 +411,20 @@ def update_task(
         task.status = data.status
         changed.append(f"状态：{old_status} → {new_status}")
     if data.priority is not None and data.priority != task.priority:
-        priority_map = {"high": "高", "medium": "中", "low": "低"}
-        old_p = priority_map.get(task.priority, task.priority)
-        new_p = priority_map.get(data.priority, data.priority)
+        old_p = level_map.get(task.priority, task.priority)
+        new_p = level_map.get(data.priority, data.priority)
         task.priority = data.priority
         changed.append(f"优先级：{old_p} → {new_p}")
+    if data.urgency is not None and data.urgency != task.urgency:
+        old_u = level_map.get(task.urgency, task.urgency)
+        new_u = level_map.get(data.urgency, data.urgency)
+        task.urgency = data.urgency
+        changed.append(f"紧急度：{old_u} → {new_u}")
+    if data.importance is not None and data.importance != task.importance:
+        old_i = level_map.get(task.importance, task.importance)
+        new_i = level_map.get(data.importance, data.importance)
+        task.importance = data.importance
+        changed.append(f"重要度：{old_i} → {new_i}")
     if data.assignee_id is not None and data.assignee_id != task.assignee_id:
         task.assignee_id = data.assignee_id
         if data.assignee_id:
@@ -342,7 +444,11 @@ def update_task(
 
     task = (
         db.query(models.Task)
-        .options(joinedload(models.Task.assignee), joinedload(models.Task.creator))
+        .options(
+            joinedload(models.Task.assignee),
+            joinedload(models.Task.creator),
+            joinedload(models.Task.project),
+        )
         .filter(models.Task.id == task.id)
         .first()
     )

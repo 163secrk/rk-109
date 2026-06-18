@@ -24,7 +24,7 @@ const routes = [
         path: 'workspace/quadrant',
         name: 'WorkspaceQuadrant',
         component: () => import('../views/workspace/Quadrant.vue'),
-        meta: { title: '四象限 - 知汇', breadcrumb: ['我的工作台', '四象限'] },
+        meta: { title: '任务四象限 - 知汇', breadcrumb: ['我的工作台', '任务四象限'] },
       },
       {
         path: 'workspace/calendar',

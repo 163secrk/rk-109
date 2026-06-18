@@ -1,9 +1,52 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from database import SessionLocal, engine, Base
 import models
 import schemas
 from auth import hash_password
+
+
+def migrate_db(db: Session):
+    try:
+        db.execute(text("ALTER TABLE tasks ADD COLUMN team_id INTEGER"))
+        db.commit()
+    except Exception:
+        pass
+
+    try:
+        db.execute(text("ALTER TABLE tasks ADD COLUMN urgency VARCHAR(10) DEFAULT 'low'"))
+        db.commit()
+    except Exception:
+        pass
+
+    try:
+        db.execute(text("ALTER TABLE tasks ADD COLUMN importance VARCHAR(10) DEFAULT 'low'"))
+        db.commit()
+    except Exception:
+        pass
+
+    try:
+        db.execute(text("UPDATE tasks SET urgency = 'low' WHERE urgency IS NULL"))
+        db.commit()
+    except Exception:
+        pass
+
+    try:
+        db.execute(text("UPDATE tasks SET importance = 'low' WHERE importance IS NULL"))
+        db.commit()
+    except Exception:
+        pass
+
+    try:
+        db.execute(text("""
+            UPDATE tasks SET team_id = (
+                SELECT team_id FROM projects WHERE projects.id = tasks.project_id
+            ) WHERE team_id IS NULL AND project_id IS NOT NULL
+        """))
+        db.commit()
+    except Exception:
+        pass
 
 
 def init_roles(db: Session):
@@ -88,6 +131,7 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
+        migrate_db(db)
         init_roles(db)
         init_demo_data(db)
     finally:

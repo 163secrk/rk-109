@@ -103,11 +103,14 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
     title = Column(String(255), nullable=False)
     description = Column(Text, default="")
     status = Column(String(20), default="todo")
     priority = Column(String(10), default="medium")
+    urgency = Column(String(10), default="low")
+    importance = Column(String(10), default="low")
     assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     due_date = Column(DateTime, nullable=True)
@@ -115,6 +118,7 @@ class Task(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project = relationship("Project", back_populates="tasks")
+    team = relationship("Team")
     assignee = relationship("User", foreign_keys=[assignee_id])
     creator = relationship("User", foreign_keys=[creator_id])
     comments = relationship("TaskComment", back_populates="task", cascade="all, delete-orphan")

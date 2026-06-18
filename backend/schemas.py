@@ -32,7 +32,7 @@ MENU_CONFIG = {
         "name": "我的工作台",
         "icon": "DashboardOutlined",
         "children": [
-            {"key": "workspace.quadrant", "name": "四象限", "path": "/workspace/quadrant"},
+            {"key": "workspace.quadrant", "name": "任务四象限", "path": "/workspace/quadrant"},
             {"key": "workspace.calendar", "name": "日历视图", "path": "/workspace/calendar"},
         ],
     },
@@ -216,11 +216,23 @@ class ProjectInfo(BaseModel):
 
 
 class TaskCreate(BaseModel):
-    project_id: int
+    project_id: Optional[int] = None
+    team_id: Optional[int] = None
     title: str = Field(..., min_length=1, max_length=255)
     description: str = ""
     priority: str = "medium"
+    urgency: str = "low"
+    importance: str = "low"
     assignee_id: Optional[int] = None
+    due_date: Optional[datetime] = None
+
+
+class PersonalTaskCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    description: str = ""
+    urgency: str = "low"
+    importance: str = "low"
+    priority: str = "medium"
     due_date: Optional[datetime] = None
 
 
@@ -229,6 +241,8 @@ class TaskUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     priority: Optional[str] = None
+    urgency: Optional[str] = None
+    importance: Optional[str] = None
     assignee_id: Optional[int] = None
     due_date: Optional[datetime] = None
 
@@ -240,13 +254,17 @@ class TaskCommentCreate(BaseModel):
 
 class TaskInfo(BaseModel):
     id: int
-    project_id: int
+    project_id: Optional[int] = None
+    team_id: Optional[int] = None
     title: str
     description: str
     status: str
     priority: str
+    urgency: str
+    importance: str
     assignee: Optional[UserInfo] = None
     creator: UserInfo
+    project: Optional[ProjectInfo] = None
     due_date: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
