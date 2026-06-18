@@ -48,6 +48,58 @@ def migrate_db(db: Session):
     except Exception:
         pass
 
+    try:
+        db.execute(text("ALTER TABLE tasks ADD COLUMN parent_id INTEGER"))
+        db.commit()
+    except Exception:
+        pass
+
+    try:
+        db.execute(text("ALTER TABLE tasks ADD COLUMN start_date DATETIME"))
+        db.commit()
+    except Exception:
+        pass
+
+    try:
+        db.execute(text("ALTER TABLE tasks ADD COLUMN sort_order INTEGER DEFAULT 0"))
+        db.commit()
+    except Exception:
+        pass
+
+    try:
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS task_dependencies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL,
+                depends_on_id INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (task_id) REFERENCES tasks(id),
+                FOREIGN KEY (depends_on_id) REFERENCES tasks(id)
+            )
+        """))
+        db.commit()
+    except Exception:
+        pass
+
+    try:
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS milestones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                title VARCHAR(255) NOT NULL,
+                date DATETIME NOT NULL,
+                description TEXT DEFAULT '',
+                created_by INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                FOREIGN KEY (created_by) REFERENCES users(id)
+            )
+        """))
+        db.commit()
+    except Exception:
+        pass
+
 
 def init_roles(db: Session):
     roles_data = [

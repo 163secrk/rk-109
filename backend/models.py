@@ -105,6 +105,7 @@ class Task(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
     team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
+    parent_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)
     title = Column(String(255), nullable=False)
     description = Column(Text, default="")
     status = Column(String(20), default="todo")
@@ -113,7 +114,9 @@ class Task(Base):
     importance = Column(String(10), default="low")
     assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    start_date = Column(DateTime, nullable=True)
     due_date = Column(DateTime, nullable=True)
+    sort_order = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -121,9 +124,41 @@ class Task(Base):
     team = relationship("Team")
     assignee = relationship("User", foreign_keys=[assignee_id])
     creator = relationship("User", foreign_keys=[creator_id])
+    parent = relationship("Task", remote_side=[id], back_populates="children")
+    children = relationship("Task", back_populates="parent", cascade="all, delete-orphan")
     comments = relationship("TaskComment", back_populates="task", cascade="all, delete-orphan")
     activities = relationship("TaskActivity", back_populates="task", cascade="all, delete-orphan")
     attachments = relationship("TaskAttachment", back_populates="task", cascade="all, delete-orphan")
+    dependencies = relationship("TaskDependency", foreign_keys="TaskDependency.task_id", back_populates="task", cascade="all, delete-orphan")
+    dependents = relationship("TaskDependency", foreign_keys="TaskDependency.depends_on_id", back_populates="depends_on", cascade="all, delete-orphan")
+
+
+class TaskDependency(Base):
+    __tablename__ = "task_dependencies"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    depends_on_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    task = relationship("Task", foreign_keys=[task_id], back_populates="dependencies")
+    depends_on = relationship("Task", foreign_keys=[depends_on_id], back_populates="dependents")
+
+
+class Milestone(Base):
+    __tablename__ = "milestones"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    title = Column(String(255), nullable=False)
+    date = Column(DateTime, nullable=False)
+    description = Column(Text, default="")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project = relationship("Project")
+    creator = relationship("User", foreign_keys=[created_by])
 
 
 class TaskComment(Base):

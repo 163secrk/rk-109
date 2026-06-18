@@ -58,3 +58,31 @@ export const listMyTasksApi = (status) => {
 export const createPersonalTaskApi = (data) => {
   return request.post('/api/project/personal-tasks', data)
 }
+
+export const listTasksFlatApi = (projectId) => {
+  return request.get(`/api/project/projects/${projectId}/tasks/flat`)
+}
+
+export const addDependencyApi = (taskId, dependsOnId) => {
+  return request.post(`/api/project/tasks/${taskId}/dependencies?depends_on_id=${dependsOnId}`)
+}
+
+export const removeDependencyApi = (taskId, dependsOnId) => {
+  return request.delete(`/api/project/tasks/${taskId}/dependencies/${dependsOnId}`)
+}
+
+export const listMilestonesApi = (projectId) => {
+  return request.get(`/api/project/projects/${projectId}/milestones`)
+}
+
+export const createMilestoneApi = (projectId, data) => {
+  return request.post(`/api/project/projects/${projectId}/milestones`, data)
+}
+
+export const updateMilestoneApi = (milestoneId, data) => {
+  return request.put(`/api/project/milestones/${milestoneId}`, data)
+}
+
+export const deleteMilestoneApi = (milestoneId) => {
+  return request.delete(`/api/project/milestones/${milestoneId}`)
+}

@@ -218,13 +218,16 @@ class ProjectInfo(BaseModel):
 class TaskCreate(BaseModel):
     project_id: Optional[int] = None
     team_id: Optional[int] = None
+    parent_id: Optional[int] = None
     title: str = Field(..., min_length=1, max_length=255)
     description: str = ""
     priority: str = "medium"
     urgency: str = "low"
     importance: str = "low"
     assignee_id: Optional[int] = None
+    start_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
+    sort_order: int = 0
 
 
 class PersonalTaskCreate(BaseModel):
@@ -233,6 +236,7 @@ class PersonalTaskCreate(BaseModel):
     urgency: str = "low"
     importance: str = "low"
     priority: str = "medium"
+    start_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
 
 
@@ -244,7 +248,10 @@ class TaskUpdate(BaseModel):
     urgency: Optional[str] = None
     importance: Optional[str] = None
     assignee_id: Optional[int] = None
+    parent_id: Optional[int] = None
+    start_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
+    sort_order: Optional[int] = None
 
 
 class TaskCommentCreate(BaseModel):
@@ -256,6 +263,7 @@ class TaskInfo(BaseModel):
     id: int
     project_id: Optional[int] = None
     team_id: Optional[int] = None
+    parent_id: Optional[int] = None
     title: str
     description: str
     status: str
@@ -265,7 +273,50 @@ class TaskInfo(BaseModel):
     assignee: Optional[UserInfo] = None
     creator: UserInfo
     project: Optional[ProjectInfo] = None
+    start_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
+    sort_order: int = 0
+    children: List["TaskInfo"] = []
+    dependencies: List[int] = []
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+TaskInfo.model_rebuild()
+
+
+class TaskDependencyInfo(BaseModel):
+    id: int
+    task_id: int
+    depends_on_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class MilestoneCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    date: datetime
+    description: str = ""
+
+
+class MilestoneUpdate(BaseModel):
+    title: Optional[str] = None
+    date: Optional[datetime] = None
+    description: Optional[str] = None
+
+
+class MilestoneInfo(BaseModel):
+    id: int
+    project_id: int
+    title: str
+    date: datetime
+    description: str
+    creator: UserInfo
     created_at: datetime
     updated_at: datetime
 

@@ -174,6 +174,33 @@ def delete_project(
     return {"status": "ok", "message": "已删除"}
 
 
+def _build_task_tree(tasks, dependencies_map):
+    task_map = {}
+    root_tasks = []
+    
+    for task in tasks:
+        task_dict = schemas.TaskInfo.model_validate(task).model_dump()
+        task_dict["dependencies"] = dependencies_map.get(task.id, [])
+        task_dict["children"] = []
+        task_map[task.id] = task_dict
+    
+    for task_id, task_dict in task_map.items():
+        parent_id = task_dict.get("parent_id")
+        if parent_id and parent_id in task_map:
+            task_map[parent_id]["children"].append(task_dict)
+        else:
+            root_tasks.append(task_dict)
+    
+    def sort_tasks(tasks_list):
+        tasks_list.sort(key=lambda x: x.get("sort_order", 0))
+        for task in tasks_list:
+            if task["children"]:
+                sort_tasks(task["children"])
+    
+    sort_tasks(root_tasks)
+    return root_tasks
+
+
 @router.get("/projects/{project_id}/tasks", response_model=List[schemas.TaskInfo], dependencies=[Depends(require_project)])
 def list_tasks(
     project_id: int,
@@ -196,9 +223,70 @@ def list_tasks(
             joinedload(models.Task.project),
         )
         .filter(models.Task.project_id == project_id)
+        .order_by(models.Task.sort_order, models.Task.id)
         .all()
     )
-    return [schemas.TaskInfo.model_validate(t) for t in tasks]
+    
+    dependencies = (
+        db.query(models.TaskDependency)
+        .filter(models.TaskDependency.task_id.in_([t.id for t in tasks]))
+        .all()
+    )
+    
+    dependencies_map = {}
+    for dep in dependencies:
+        if dep.task_id not in dependencies_map:
+            dependencies_map[dep.task_id] = []
+        dependencies_map[dep.task_id].append(dep.depends_on_id)
+    
+    return _build_task_tree(tasks, dependencies_map)
+
+
+@router.get("/projects/{project_id}/tasks/flat", response_model=List[schemas.TaskInfo], dependencies=[Depends(require_project)])
+def list_tasks_flat(
+    project_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    team_id = _get_current_team_id(current_user, db)
+    if project.team_id != team_id:
+        raise HTTPException(status_code=403, detail="无权访问该项目")
+
+    tasks = (
+        db.query(models.Task)
+        .options(
+            joinedload(models.Task.assignee),
+            joinedload(models.Task.creator),
+            joinedload(models.Task.project),
+        )
+        .filter(models.Task.project_id == project_id)
+        .order_by(models.Task.sort_order, models.Task.id)
+        .all()
+    )
+    
+    dependencies = (
+        db.query(models.TaskDependency)
+        .filter(models.TaskDependency.task_id.in_([t.id for t in tasks]))
+        .all()
+    )
+    
+    dependencies_map = {}
+    for dep in dependencies:
+        if dep.task_id not in dependencies_map:
+            dependencies_map[dep.task_id] = []
+        dependencies_map[dep.task_id].append(dep.depends_on_id)
+    
+    result = []
+    for task in tasks:
+        task_dict = schemas.TaskInfo.model_validate(task).model_dump()
+        task_dict["dependencies"] = dependencies_map.get(task.id, [])
+        result.append(task_dict)
+    
+    return result
 
 
 @router.post("/tasks", response_model=schemas.TaskInfo, dependencies=[Depends(require_project)])
@@ -216,9 +304,15 @@ def create_task(
         if project.team_id != team_id:
             raise HTTPException(status_code=403, detail="无权访问该项目")
 
+    if data.parent_id:
+        parent_task = db.query(models.Task).filter(models.Task.id == data.parent_id).first()
+        if not parent_task:
+            raise HTTPException(status_code=404, detail="父任务不存在")
+
     task = models.Task(
         project_id=data.project_id,
         team_id=team_id,
+        parent_id=data.parent_id,
         title=data.title,
         description=data.description,
         status="todo",
@@ -227,7 +321,9 @@ def create_task(
         importance=data.importance,
         assignee_id=data.assignee_id or current_user.id,
         creator_id=current_user.id,
+        start_date=data.start_date,
         due_date=data.due_date,
+        sort_order=data.sort_order,
     )
     db.add(task)
     db.commit()
@@ -432,9 +528,24 @@ def update_task(
             changed.append(f"负责人：{assignee.name if assignee else '未指派'}")
         else:
             changed.append("负责人：未指派")
+    if data.parent_id is not None and data.parent_id != task.parent_id:
+        if data.parent_id == task.id:
+            raise HTTPException(status_code=400, detail="父任务不能是自己")
+        if data.parent_id:
+            parent_task = db.query(models.Task).filter(models.Task.id == data.parent_id).first()
+            if not parent_task:
+                raise HTTPException(status_code=404, detail="父任务不存在")
+        task.parent_id = data.parent_id
+        changed.append("父任务")
+    if data.start_date is not None and data.start_date != task.start_date:
+        task.start_date = data.start_date
+        changed.append("开始日期")
     if data.due_date is not None and data.due_date != task.due_date:
         task.due_date = data.due_date
         changed.append("截止日期")
+    if data.sort_order is not None and data.sort_order != task.sort_order:
+        task.sort_order = data.sort_order
+        changed.append("排序")
 
     db.commit()
     db.refresh(task)
@@ -585,4 +696,183 @@ def delete_attachment(
 
     _create_activity(db, task.id, current_user.id, "delete_attachment", f"删除了附件：{attachment.file_name}")
 
+    return {"status": "ok", "message": "已删除"}
+
+
+@router.post("/tasks/{task_id}/dependencies", dependencies=[Depends(require_project)])
+def add_dependency(
+    task_id: int,
+    depends_on_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    task = db.query(models.Task).filter(models.Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    depends_on_task = db.query(models.Task).filter(models.Task.id == depends_on_id).first()
+    if not depends_on_task:
+        raise HTTPException(status_code=404, detail="依赖任务不存在")
+    
+    if task_id == depends_on_id:
+        raise HTTPException(status_code=400, detail="不能依赖自己")
+    
+    if task.project_id != depends_on_task.project_id:
+        raise HTTPException(status_code=400, detail="只能依赖同一项目的任务")
+    
+    existing = (
+        db.query(models.TaskDependency)
+        .filter(
+            models.TaskDependency.task_id == task_id,
+            models.TaskDependency.depends_on_id == depends_on_id,
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="依赖关系已存在")
+    
+    dependency = models.TaskDependency(task_id=task_id, depends_on_id=depends_on_id)
+    db.add(dependency)
+    db.commit()
+    
+    return {"status": "ok", "message": "添加成功"}
+
+
+@router.delete("/tasks/{task_id}/dependencies/{depends_on_id}", dependencies=[Depends(require_project)])
+def remove_dependency(
+    task_id: int,
+    depends_on_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    dependency = (
+        db.query(models.TaskDependency)
+        .filter(
+            models.TaskDependency.task_id == task_id,
+            models.TaskDependency.depends_on_id == depends_on_id,
+        )
+        .first()
+    )
+    if not dependency:
+        raise HTTPException(status_code=404, detail="依赖关系不存在")
+    
+    db.delete(dependency)
+    db.commit()
+    
+    return {"status": "ok", "message": "删除成功"}
+
+
+@router.get("/projects/{project_id}/milestones", response_model=List[schemas.MilestoneInfo], dependencies=[Depends(require_project)])
+def list_milestones(
+    project_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    team_id = _get_current_team_id(current_user, db)
+    if project.team_id != team_id:
+        raise HTTPException(status_code=403, detail="无权访问该项目")
+    
+    milestones = (
+        db.query(models.Milestone)
+        .options(joinedload(models.Milestone.creator))
+        .filter(models.Milestone.project_id == project_id)
+        .order_by(models.Milestone.date)
+        .all()
+    )
+    
+    return [schemas.MilestoneInfo.model_validate(m) for m in milestones]
+
+
+@router.post("/projects/{project_id}/milestones", response_model=schemas.MilestoneInfo, dependencies=[Depends(require_project)])
+def create_milestone(
+    project_id: int,
+    data: schemas.MilestoneCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    team_id = _get_current_team_id(current_user, db)
+    if project.team_id != team_id:
+        raise HTTPException(status_code=403, detail="无权访问该项目")
+    
+    milestone = models.Milestone(
+        project_id=project_id,
+        title=data.title,
+        date=data.date,
+        description=data.description,
+        created_by=current_user.id,
+    )
+    db.add(milestone)
+    db.commit()
+    db.refresh(milestone)
+    
+    milestone = (
+        db.query(models.Milestone)
+        .options(joinedload(models.Milestone.creator))
+        .filter(models.Milestone.id == milestone.id)
+        .first()
+    )
+    
+    return schemas.MilestoneInfo.model_validate(milestone)
+
+
+@router.put("/milestones/{milestone_id}", response_model=schemas.MilestoneInfo, dependencies=[Depends(require_project)])
+def update_milestone(
+    milestone_id: int,
+    data: schemas.MilestoneUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    milestone = (
+        db.query(models.Milestone)
+        .options(joinedload(models.Milestone.creator))
+        .filter(models.Milestone.id == milestone_id)
+        .first()
+    )
+    if not milestone:
+        raise HTTPException(status_code=404, detail="里程碑不存在")
+    
+    project = db.query(models.Project).filter(models.Project.id == milestone.project_id).first()
+    team_id = _get_current_team_id(current_user, db)
+    if project.team_id != team_id:
+        raise HTTPException(status_code=403, detail="无权访问该里程碑")
+    
+    if data.title is not None:
+        milestone.title = data.title
+    if data.date is not None:
+        milestone.date = data.date
+    if data.description is not None:
+        milestone.description = data.description
+    
+    db.commit()
+    db.refresh(milestone)
+    
+    return schemas.MilestoneInfo.model_validate(milestone)
+
+
+@router.delete("/milestones/{milestone_id}", dependencies=[Depends(require_project)])
+def delete_milestone(
+    milestone_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    milestone = db.query(models.Milestone).filter(models.Milestone.id == milestone_id).first()
+    if not milestone:
+        raise HTTPException(status_code=404, detail="里程碑不存在")
+    
+    project = db.query(models.Project).filter(models.Project.id == milestone.project_id).first()
+    team_id = _get_current_team_id(current_user, db)
+    if project.team_id != team_id:
+        raise HTTPException(status_code=403, detail="无权访问该里程碑")
+    
+    db.delete(milestone)
+    db.commit()
+    
     return {"status": "ok", "message": "已删除"}
