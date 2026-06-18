@@ -1,7 +1,7 @@
 from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
 import models
@@ -185,7 +185,12 @@ def list_tasks(
     if project.team_id != team_id:
         raise HTTPException(status_code=403, detail="无权访问该项目")
 
-    tasks = db.query(models.Task).filter(models.Task.project_id == project_id).all()
+    tasks = (
+        db.query(models.Task)
+        .options(joinedload(models.Task.assignee), joinedload(models.Task.creator))
+        .filter(models.Task.project_id == project_id)
+        .all()
+    )
     return [schemas.TaskInfo.model_validate(t) for t in tasks]
 
 
@@ -219,7 +224,12 @@ def create_task(
 
     _create_activity(db, task.id, current_user.id, "create", f"创建了任务")
 
-    db.refresh(task)
+    task = (
+        db.query(models.Task)
+        .options(joinedload(models.Task.assignee), joinedload(models.Task.creator))
+        .filter(models.Task.id == task.id)
+        .first()
+    )
     return schemas.TaskInfo.model_validate(task)
 
 
@@ -229,7 +239,12 @@ def get_task(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    task = db.query(models.Task).filter(models.Task.id == task_id).first()
+    task = (
+        db.query(models.Task)
+        .options(joinedload(models.Task.assignee), joinedload(models.Task.creator))
+        .filter(models.Task.id == task_id)
+        .first()
+    )
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
@@ -272,7 +287,12 @@ def update_task(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    task = db.query(models.Task).filter(models.Task.id == task_id).first()
+    task = (
+        db.query(models.Task)
+        .options(joinedload(models.Task.assignee), joinedload(models.Task.creator))
+        .filter(models.Task.id == task_id)
+        .first()
+    )
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
@@ -317,6 +337,12 @@ def update_task(
     if changed:
         _create_activity(db, task.id, current_user.id, "update", "修改了：" + "、".join(changed))
 
+    task = (
+        db.query(models.Task)
+        .options(joinedload(models.Task.assignee), joinedload(models.Task.creator))
+        .filter(models.Task.id == task.id)
+        .first()
+    )
     return schemas.TaskInfo.model_validate(task)
 
 

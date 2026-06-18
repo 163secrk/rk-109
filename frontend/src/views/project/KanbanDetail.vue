@@ -127,6 +127,8 @@
             <n-date-picker
               v-model:value="createTaskForm.due_date"
               type="date"
+              value-format="yyyy-MM-dd HH:mm:ss"
+              :min-date="minDate"
               placeholder="请选择截止日期"
               style="width: 100%"
             />
@@ -181,6 +183,8 @@
                 <n-date-picker
                   v-model:value="editTaskForm.due_date"
                   type="date"
+                  value-format="yyyy-MM-dd HH:mm:ss"
+                  :min-date="minDate"
                   placeholder="请选择截止日期"
                   style="width: 100%"
                 />
@@ -346,6 +350,18 @@ const sortedActivities = computed(() => {
   )
 })
 
+const minDate = computed(() => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return today.getTime()
+})
+
+const formatDateForPicker = (date) => {
+  if (!date) return null
+  const d = new Date(date)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} 00:00:00`
+}
+
 const createTaskForm = reactive({
   title: '',
   description: '',
@@ -495,7 +511,7 @@ const openTaskDetail = async (task) => {
     editTaskForm.status = res.task.status
     editTaskForm.priority = res.task.priority
     editTaskForm.assignee_id = res.task.assignee?.id || null
-    editTaskForm.due_date = res.task.due_date || null
+    editTaskForm.due_date = formatDateForPicker(res.task.due_date)
     commentContent.value = ''
     showTaskDetailDrawer.value = true
   } catch (e) {
@@ -658,6 +674,7 @@ watch(
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-shrink: 0;
     font-size: 14px;
     font-weight: 600;
     color: #1f2937;
