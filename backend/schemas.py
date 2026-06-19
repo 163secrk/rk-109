@@ -366,3 +366,80 @@ class TaskDetailInfo(BaseModel):
     comments: List[TaskCommentInfo] = []
     activities: List[TaskActivityInfo] = []
     attachments: List[TaskAttachmentInfo] = []
+
+
+class KnowledgeDocCreate(BaseModel):
+    parent_id: Optional[int] = None
+    title: str = Field(..., min_length=1, max_length=255)
+    content: str = ""
+    doc_type: str = "doc"
+
+
+class KnowledgeDocUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    parent_id: Optional[int] = None
+    sort_order: Optional[int] = None
+
+
+class KnowledgeDocMove(BaseModel):
+    parent_id: Optional[int] = None
+    sort_order: int = 0
+
+
+class KnowledgeDocInfo(BaseModel):
+    id: int
+    team_id: int
+    parent_id: Optional[int] = None
+    title: str
+    content: str
+    doc_type: str
+    sort_order: int
+    creator: Optional[UserInfo] = None
+    updater: Optional[UserInfo] = None
+    created_at: datetime
+    updated_at: datetime
+    children: List["KnowledgeDocInfo"] = []
+
+    class Config:
+        from_attributes = True
+
+
+KnowledgeDocInfo.model_rebuild()
+
+
+class KnowledgeDocTreeNode(BaseModel):
+    id: int
+    parent_id: Optional[int] = None
+    title: str
+    doc_type: str
+    sort_order: int
+    children: List["KnowledgeDocTreeNode"] = []
+
+    class Config:
+        from_attributes = True
+
+
+KnowledgeDocTreeNode.model_rebuild()
+
+
+class KnowledgeVersionInfo(BaseModel):
+    id: int
+    doc_id: int
+    title: str
+    content: str
+    version: int
+    change_summary: str
+    creator: Optional[UserInfo] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class KnowledgeVersionCreate(BaseModel):
+    change_summary: str = ""
+
+
+class KnowledgeVersionRollback(BaseModel):
+    version_id: int

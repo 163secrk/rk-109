@@ -202,3 +202,42 @@ class TaskAttachment(Base):
 
     task = relationship("Task", back_populates="attachments")
     user = relationship("User")
+
+
+class KnowledgeDoc(Base):
+    __tablename__ = "knowledge_docs"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
+    parent_id = Column(Integer, ForeignKey("knowledge_docs.id"), nullable=True)
+    title = Column(String(255), nullable=False)
+    content = Column(Text, default="")
+    doc_type = Column(String(20), default="doc")
+    sort_order = Column(Integer, default=0)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    team = relationship("Team")
+    creator = relationship("User", foreign_keys=[created_by])
+    updater = relationship("User", foreign_keys=[updated_by])
+    parent = relationship("KnowledgeDoc", remote_side=[id], back_populates="children")
+    children = relationship("KnowledgeDoc", back_populates="parent", cascade="all, delete-orphan")
+    versions = relationship("KnowledgeVersion", back_populates="doc", cascade="all, delete-orphan")
+
+
+class KnowledgeVersion(Base):
+    __tablename__ = "knowledge_versions"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    doc_id = Column(Integer, ForeignKey("knowledge_docs.id"), nullable=False)
+    title = Column(String(255), nullable=False)
+    content = Column(Text, default="")
+    version = Column(Integer, default=1)
+    change_summary = Column(String(500), default="")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    doc = relationship("KnowledgeDoc", back_populates="versions")
+    creator = relationship("User")
