@@ -35,3 +35,23 @@ export const createKnowledgeVersionApi = (docId, data) => {
 export const rollbackKnowledgeVersionApi = (docId, data) => {
   return request.post(`/api/document/knowledge/docs/${docId}/versions/rollback`, data)
 }
+
+export const listFlowchartsApi = () => {
+  return request.get('/api/document/flowcharts')
+}
+
+export const getFlowchartApi = (chartId) => {
+  return request.get(`/api/document/flowcharts/${chartId}`)
+}
+
+export const createFlowchartApi = (data) => {
+  return request.post('/api/document/flowcharts', data)
+}
+
+export const updateFlowchartApi = (chartId, data) => {
+  return request.put(`/api/document/flowcharts/${chartId}`, data)
+}
+
+export const deleteFlowchartApi = (chartId) => {
+  return request.delete(`/api/document/flowcharts/${chartId}`)
+}

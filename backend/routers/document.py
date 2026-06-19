@@ -403,9 +403,136 @@ def mindmap(
     return {"maps": []}
 
 
-@router.get("/flowchart", dependencies=[Depends(require_document)])
-def flowchart(
+@router.get("/flowcharts", response_model=List[schemas.FlowchartListItem], dependencies=[Depends(require_document)])
+def list_flowcharts(
     current_user: models.User = Depends(get_current_user),
-    _=Depends(require_document),
+    db: Session = Depends(get_db),
 ):
-    return {"charts": []}
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    charts = (
+        db.query(models.Flowchart)
+        .options(joinedload(models.Flowchart.creator))
+        .filter(models.Flowchart.team_id == team_id)
+        .order_by(models.Flowchart.updated_at.desc())
+        .all()
+    )
+
+    return [schemas.FlowchartListItem.model_validate(c) for c in charts]
+
+
+@router.get("/flowcharts/{chart_id}", response_model=schemas.FlowchartInfo, dependencies=[Depends(require_document)])
+def get_flowchart(
+    chart_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    chart = (
+        db.query(models.Flowchart)
+        .options(
+            joinedload(models.Flowchart.creator),
+            joinedload(models.Flowchart.updater),
+        )
+        .filter(models.Flowchart.id == chart_id)
+        .first()
+    )
+    if not chart:
+        raise HTTPException(status_code=404, detail="流程图不存在")
+
+    team_id = _get_current_team_id(current_user, db)
+    if chart.team_id != team_id:
+        raise HTTPException(status_code=403, detail="无权访问该流程图")
+
+    return schemas.FlowchartInfo.model_validate(chart)
+
+
+@router.post("/flowcharts", response_model=schemas.FlowchartInfo, dependencies=[Depends(require_document)])
+def create_flowchart(
+    data: schemas.FlowchartCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    chart = models.Flowchart(
+        team_id=team_id,
+        name=data.name,
+        content=data.content,
+        created_by=current_user.id,
+        updated_by=current_user.id,
+    )
+    db.add(chart)
+    db.commit()
+    db.refresh(chart)
+
+    chart = (
+        db.query(models.Flowchart)
+        .options(
+            joinedload(models.Flowchart.creator),
+            joinedload(models.Flowchart.updater),
+        )
+        .filter(models.Flowchart.id == chart.id)
+        .first()
+    )
+    return schemas.FlowchartInfo.model_validate(chart)
+
+
+@router.put("/flowcharts/{chart_id}", response_model=schemas.FlowchartInfo, dependencies=[Depends(require_document)])
+def update_flowchart(
+    chart_id: int,
+    data: schemas.FlowchartUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    chart = db.query(models.Flowchart).filter(models.Flowchart.id == chart_id).first()
+    if not chart:
+        raise HTTPException(status_code=404, detail="流程图不存在")
+
+    team_id = _get_current_team_id(current_user, db)
+    if chart.team_id != team_id:
+        raise HTTPException(status_code=403, detail="无权访问该流程图")
+
+    if data.name is not None:
+        chart.name = data.name
+    if data.content is not None:
+        chart.content = data.content
+    if data.thumbnail is not None:
+        chart.thumbnail = data.thumbnail
+
+    chart.updated_by = current_user.id
+    db.commit()
+    db.refresh(chart)
+
+    chart = (
+        db.query(models.Flowchart)
+        .options(
+            joinedload(models.Flowchart.creator),
+            joinedload(models.Flowchart.updater),
+        )
+        .filter(models.Flowchart.id == chart.id)
+        .first()
+    )
+    return schemas.FlowchartInfo.model_validate(chart)
+
+
+@router.delete("/flowcharts/{chart_id}", dependencies=[Depends(require_document)])
+def delete_flowchart(
+    chart_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    chart = db.query(models.Flowchart).filter(models.Flowchart.id == chart_id).first()
+    if not chart:
+        raise HTTPException(status_code=404, detail="流程图不存在")
+
+    team_id = _get_current_team_id(current_user, db)
+    if chart.team_id != team_id:
+        raise HTTPException(status_code=403, detail="无权访问该流程图")
+
+    db.delete(chart)
+    db.commit()
+    return {"status": "ok", "message": "已删除"}

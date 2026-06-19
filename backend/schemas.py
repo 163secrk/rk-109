@@ -443,3 +443,42 @@ class KnowledgeVersionCreate(BaseModel):
 
 class KnowledgeVersionRollback(BaseModel):
     version_id: int
+
+
+class FlowchartCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    content: str = ""
+
+
+class FlowchartUpdate(BaseModel):
+    name: Optional[str] = None
+    content: Optional[str] = None
+    thumbnail: Optional[str] = None
+
+
+class FlowchartInfo(BaseModel):
+    id: int
+    team_id: int
+    name: str
+    content: str
+    thumbnail: str
+    creator: Optional[UserInfo] = None
+    updater: Optional[UserInfo] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class FlowchartListItem(BaseModel):
+    id: int
+    team_id: int
+    name: str
+    thumbnail: str
+    creator: Optional[UserInfo] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True

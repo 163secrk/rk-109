@@ -241,3 +241,21 @@ class KnowledgeVersion(Base):
 
     doc = relationship("KnowledgeDoc", back_populates="versions")
     creator = relationship("User")
+
+
+class Flowchart(Base):
+    __tablename__ = "flowcharts"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    content = Column(Text, default="")
+    thumbnail = Column(Text, default="")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    team = relationship("Team")
+    creator = relationship("User", foreign_keys=[created_by])
+    updater = relationship("User", foreign_keys=[updated_by])

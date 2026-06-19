@@ -75,6 +75,12 @@ const routes = [
         meta: { title: '流程图 - 知汇', breadcrumb: ['文档协作', '流程图'] },
       },
       {
+        path: 'document/flowchart/:chartId',
+        name: 'DocumentFlowchartEditor',
+        component: () => import('../views/document/FlowchartEditor.vue'),
+        meta: { title: '流程图编辑 - 知汇', breadcrumb: ['文档协作', '流程图', '编辑'] },
+      },
+      {
         path: 'team/chat',
         name: 'TeamChat',
         component: () => import('../views/team/Chat.vue'),
