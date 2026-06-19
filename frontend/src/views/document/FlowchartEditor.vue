@@ -67,7 +67,9 @@
             @dragstart="(e) => handleShapeDragStart(e, shape)"
           >
             <svg class="shape-icon" viewBox="0 0 80 50">
-              <component :is="shape.comp" :x="40" :y="25" :w="64" :h="36" fill="#e0f2fe" stroke="#0284c7" sw="2" />
+              <g transform="translate(40, 25)">
+                <component :is="shape.comp" :x="0" :y="0" :w="64" :h="36" fill="#e0f2fe" stroke="#0284c7" sw="2" />
+              </g>
             </svg>
             <span class="shape-label">{{ shape.label }}</span>
           </div>
@@ -404,13 +406,6 @@ const undoStack = ref([])
 const redoStack = ref([])
 const MAX_HISTORY = 50
 
-const shapeList = [
-  { type: 'start', label: '开始/结束', comp: 'RoundedRectShape' },
-  { type: 'process', label: '处理步骤', comp: 'RectShape' },
-  { type: 'decision', label: '判断', comp: 'DiamondShape' },
-  { type: 'io', label: '输入输出', comp: 'ParallelogramShape' },
-]
-
 const fillColors = [
   '#ffffff', '#dbeafe', '#e0f2fe', '#fef3c7', '#dcfce7',
   '#fce7f3', '#ede9fe', '#fee2e2', '#f1f5f9', '#fef9c3',
@@ -482,6 +477,13 @@ const shapeComponents = {
   decision: DiamondShape,
   io: ParallelogramShape,
 }
+
+const shapeList = [
+  { type: 'start', label: '开始/结束', comp: RoundedRectShape },
+  { type: 'process', label: '处理步骤', comp: RectShape },
+  { type: 'decision', label: '判断', comp: DiamondShape },
+  { type: 'io', label: '输入输出', comp: ParallelogramShape },
+]
 
 const defaultShapeStyles = {
   start: { w: 120, h: 50, fill: '#dbeafe', stroke: '#2563eb', text: '开始' },
@@ -622,8 +624,8 @@ const handleCanvasDrop = (e) => {
   if (!data) return
   const shape = JSON.parse(data)
   const rect = canvasWrapRef.value.getBoundingClientRect()
-  const x = (e.clientX - rect.left - offset.x) / scale
-  const y = (e.clientY - rect.top - offset.y) / scale
+  const x = (e.clientX - rect.left - offset.x) / scale.value
+  const y = (e.clientY - rect.top - offset.y) / scale.value
   addNode(shape.type, x, y)
 }
 
@@ -903,11 +905,19 @@ const handleFit = () => {
     maxY = Math.max(maxY, n.y + n.h / 2)
   }
   const rect = canvasWrapRef.value.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) {
+    scale.value = 1
+    offset.x = 0
+    offset.y = 0
+    return
+  }
   const pad = 80
-  const sc = Math.min((rect.width - pad) / (maxX - minX + pad), (rect.height - pad) / (maxY - minY + pad), 1)
-  scale.value = sc
-  offset.x = rect.width / 2 - ((minX + maxX) / 2) * sc
-  offset.y = rect.height / 2 - ((minY + maxY) / 2) * sc
+  const contentW = Math.max(maxX - minX, 1)
+  const contentH = Math.max(maxY - minY, 1)
+  const sc = Math.min((rect.width - pad) / (contentW + pad), (rect.height - pad) / (contentH + pad), 1)
+  scale.value = Math.max(0.1, sc)
+  offset.x = rect.width / 2 - ((minX + maxX) / 2) * scale.value
+  offset.y = rect.height / 2 - ((minY + maxY) / 2) * scale.value
 }
 
 const handleExport = async () => {
@@ -1118,7 +1128,10 @@ const loadChart = async () => {
     edges.value = data.edges
     if (nodes.value.length > 0) {
       await nextTick()
-      handleFit()
+      requestAnimationFrame(() => {
+        handleFit()
+        requestAnimationFrame(() => handleFit())
+      })
     }
   } catch (e) {
     message.error(e?.detail || e?.message || '加载失败')
