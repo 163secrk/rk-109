@@ -150,6 +150,9 @@
 
     <n-modal v-model:show="showCreateDocModal" preset="card" title="新建文档" style="width: 480px">
       <n-form ref="createFormRef" :model="createForm" label-placement="top">
+        <n-form-item label="父目录">
+          <n-tag>{{ createFormParentTitle }}</n-tag>
+        </n-form-item>
         <n-form-item label="文档标题" path="title" :rule="{ required: true, message: '请输入文档标题' }">
           <n-input v-model:value="createForm.title" placeholder="请输入文档标题" />
         </n-form-item>
@@ -255,6 +258,7 @@ const versionFormRef = ref(null)
 const treeData = ref([])
 const selectedKeys = ref([])
 const expandedKeys = ref([])
+const selectedFolderId = ref(null)
 const currentDoc = ref(null)
 const editContent = ref('')
 const saveStatus = ref('saved')
@@ -267,6 +271,7 @@ const loadingVersions = ref(false)
 const versions = ref([])
 const autoSaveTimer = ref(null)
 const dirty = ref(false)
+const nodeIdMap = ref({})
 
 const contextMenuShow = ref(null)
 const contextMenuX = ref(0)
@@ -276,6 +281,12 @@ const createForm = reactive({
   title: '',
   doc_type: 'doc',
   parent_id: null,
+})
+
+const createFormParentTitle = computed(() => {
+  if (!createForm.parent_id) return '根目录'
+  const node = nodeIdMap.value[createForm.parent_id]
+  return node ? node.title : '未知目录'
 })
 
 const versionForm = reactive({
@@ -350,10 +361,27 @@ async function fetchTree() {
   try {
     const res = await listKnowledgeTreeApi()
     treeData.value = res
-    collectAllIds(res, expandedKeys.value)
+    buildNodeIdMap(res)
+    const ids = []
+    collectAllIds(res, ids)
+    expandedKeys.value = ids
   } catch (e) {
     handleError(e, '获取文档列表失败')
   }
+}
+
+function buildNodeIdMap(nodes) {
+  const map = {}
+  const walk = (list) => {
+    for (const node of list) {
+      map[node.id] = node
+      if (node.children && node.children.length > 0) {
+        walk(node.children)
+      }
+    }
+  }
+  walk(nodes)
+  nodeIdMap.value = map
 }
 
 function collectAllIds(nodes, ids) {
@@ -371,6 +399,18 @@ async function handleSelect(keys) {
     return
   }
   const docId = keys[0]
+  const node = nodeIdMap.value[docId]
+  if (node && node.doc_type === 'folder') {
+    selectedFolderId.value = docId
+    currentDoc.value = null
+    if (!expandedKeys.value.includes(docId)) {
+      expandedKeys.value = [...expandedKeys.value, docId]
+    } else if (node.children && node.children.length > 0) {
+      expandedKeys.value = expandedKeys.value.filter((id) => id !== docId)
+    }
+    return
+  }
+  selectedFolderId.value = node?.parent_id || null
   try {
     const res = await getKnowledgeDocApi(docId)
     currentDoc.value = res
@@ -424,7 +464,19 @@ function findSiblings(nodes, parentId) {
 
 function handleCreateSelect(key) {
   createForm.doc_type = key
-  createForm.parent_id = selectedKeys.value[0] || null
+  const selectedId = selectedKeys.value[0]
+  if (selectedId) {
+    const node = nodeIdMap.value[selectedId]
+    if (node && node.doc_type === 'folder') {
+      createForm.parent_id = selectedId
+    } else if (node) {
+      createForm.parent_id = node.parent_id
+    } else {
+      createForm.parent_id = selectedFolderId.value
+    }
+  } else {
+    createForm.parent_id = selectedFolderId.value
+  }
   createForm.title = ''
   showCreateDocModal.value = true
 }
@@ -445,13 +497,18 @@ async function handleCreateDoc() {
     })
     message.success('创建成功')
     showCreateDocModal.value = false
+    const parentId = createForm.parent_id
     await fetchTree()
+    if (parentId && !expandedKeys.value.includes(parentId)) {
+      expandedKeys.value = [...expandedKeys.value, parentId]
+    }
     if (createForm.doc_type === 'doc') {
       selectedKeys.value = [res.id]
+      selectedFolderId.value = parentId
       await handleSelect([res.id])
-      if (createForm.parent_id && !expandedKeys.value.includes(createForm.parent_id)) {
-        expandedKeys.value.push(createForm.parent_id)
-      }
+    } else {
+      selectedKeys.value = [res.id]
+      selectedFolderId.value = res.id
     }
   } catch (e) {
     handleError(e, '创建失败')
@@ -654,6 +711,7 @@ async function handleNodeMenuSelect(key, option) {
   if (key === 'new-doc' || key === 'new-folder') {
     createForm.doc_type = key === 'new-doc' ? 'doc' : 'folder'
     createForm.parent_id = option.id
+    selectedFolderId.value = option.id
     createForm.title = ''
     showCreateDocModal.value = true
   } else if (key === 'rename') {
