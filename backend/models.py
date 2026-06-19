@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, func
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -279,3 +279,54 @@ class Mindmap(Base):
     project = relationship("Project")
     creator = relationship("User", foreign_keys=[created_by])
     updater = relationship("User", foreign_keys=[updated_by])
+
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    name = Column(String(100), nullable=False)
+    session_type = Column(String(20), nullable=False)
+    avatar = Column(String(255), default="")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    team = relationship("Team")
+    project = relationship("Project")
+    last_message = relationship(
+        "ChatMessage",
+        primaryjoin="and_(ChatSession.id==ChatMessage.session_id, "
+        "ChatMessage.id==foreign(func.max(ChatMessage.id)).over(partition_by=ChatMessage.session_id))",
+        uselist=False,
+        viewonly=True,
+    )
+
+
+class ChatSessionMember(Base):
+    __tablename__ = "chat_session_members"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    unread_count = Column(Integer, default=0)
+    last_read_at = Column(DateTime, default=datetime.utcnow)
+    joined_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    message_type = Column(String(20), default="text")
+    mentions = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    sender = relationship("User")

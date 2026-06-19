@@ -13,16 +13,25 @@ class RoleEnum(str, Enum):
 
 ROLE_PERMISSIONS = {
     RoleEnum.ADMIN: [
-        "workspace", "project", "document", "team", "stats", "settings"
+        "workspace", "workspace.quadrant", "workspace.calendar",
+        "project", "project.kanban", "project.gantt", "project.templates",
+        "document", "document.knowledge", "document.mindmap", "document.flowchart",
+        "team", "team.chat", "team.files",
+        "stats", "stats.dashboard",
+        "settings", "settings.members", "settings.info",
     ],
     RoleEnum.PROJECT_MANAGER: [
-        "workspace", "project", "document", "team.chat", "team.files"
+        "workspace", "workspace.quadrant", "workspace.calendar",
+        "project", "project.kanban", "project.gantt", "project.templates",
+        "document", "document.knowledge", "document.mindmap", "document.flowchart",
+        "team.chat", "team.files",
     ],
     RoleEnum.MEMBER: [
-        "workspace", "team.chat", "team.files"
+        "workspace", "workspace.quadrant", "workspace.calendar",
+        "team.chat", "team.files",
     ],
     RoleEnum.GUEST: [
-        "workspace.view"
+        "workspace.view",
     ],
 }
 

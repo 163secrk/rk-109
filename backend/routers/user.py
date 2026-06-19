@@ -1,6 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from database import get_db
 import models
@@ -114,7 +115,7 @@ def get_unread_notification_count(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    count = (
+    notification_count = (
         db.query(models.Notification)
         .filter(
             models.Notification.user_id == current_user.id,
@@ -122,7 +123,18 @@ def get_unread_notification_count(
         )
         .count()
     )
-    return {"unread_count": count}
+
+    chat_count = (
+        db.query(func.coalesce(func.sum(models.ChatSessionMember.unread_count), 0))
+        .filter(models.ChatSessionMember.user_id == current_user.id)
+        .scalar()
+    ) or 0
+
+    return {
+        "unread_count": notification_count + int(chat_count),
+        "notification_count": notification_count,
+        "chat_count": int(chat_count),
+    }
 
 
 @router.post("/notifications/{notification_id}/read")
