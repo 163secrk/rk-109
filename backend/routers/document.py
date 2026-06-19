@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
@@ -395,12 +395,192 @@ def rollback_knowledge_version(
     return schemas.KnowledgeDocInfo.model_validate(doc)
 
 
-@router.get("/mindmap", dependencies=[Depends(require_document)])
-def mindmap(
+@router.get("/mindmaps", response_model=List[schemas.MindmapListItem], dependencies=[Depends(require_document)])
+def list_mindmaps(
+    search: Optional[str] = Query(None, description="搜索关键词"),
+    project_id: Optional[int] = Query(None, description="项目ID筛选"),
     current_user: models.User = Depends(get_current_user),
-    _=Depends(require_document),
+    db: Session = Depends(get_db),
 ):
-    return {"maps": []}
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    query = (
+        db.query(models.Mindmap)
+        .options(
+            joinedload(models.Mindmap.creator),
+            joinedload(models.Mindmap.project),
+        )
+        .filter(models.Mindmap.team_id == team_id)
+    )
+
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(models.Mindmap.name.ilike(search_pattern))
+
+    if project_id is not None:
+        if project_id == 0:
+            query = query.filter(models.Mindmap.project_id.is_(None))
+        else:
+            query = query.filter(models.Mindmap.project_id == project_id)
+
+    maps = query.order_by(models.Mindmap.updated_at.desc()).all()
+    return [schemas.MindmapListItem.model_validate(m) for m in maps]
+
+
+@router.get("/mindmaps/{map_id}", response_model=schemas.MindmapInfo, dependencies=[Depends(require_document)])
+def get_mindmap(
+    map_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    mindmap = (
+        db.query(models.Mindmap)
+        .options(
+            joinedload(models.Mindmap.creator),
+            joinedload(models.Mindmap.updater),
+        )
+        .filter(models.Mindmap.id == map_id)
+        .first()
+    )
+    if not mindmap:
+        raise HTTPException(status_code=404, detail="思维导图不存在")
+
+    team_id = _get_current_team_id(current_user, db)
+    if mindmap.team_id != team_id:
+        raise HTTPException(status_code=403, detail="无权访问该思维导图")
+
+    return schemas.MindmapInfo.model_validate(mindmap)
+
+
+@router.post("/mindmaps", response_model=schemas.MindmapInfo, dependencies=[Depends(require_document)])
+def create_mindmap(
+    data: schemas.MindmapCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    if data.project_id:
+        project = db.query(models.Project).filter(models.Project.id == data.project_id).first()
+        if not project or project.team_id != team_id:
+            raise HTTPException(status_code=404, detail="项目不存在")
+
+    default_content = data.content
+    if not default_content:
+        import json
+        root_id = f"root_{int(datetime.utcnow().timestamp() * 1000)}"
+        default_content = json.dumps({
+            "nodes": {
+                root_id: {
+                    "id": root_id,
+                    "text": data.name,
+                    "parentId": None,
+                    "children": [],
+                    "color": "#2563eb",
+                    "textColor": "#ffffff",
+                    "x": 2000,
+                    "y": 1500,
+                    "w": 160,
+                    "h": 60,
+                    "icon": "",
+                    "link": "",
+                }
+            },
+            "rootId": root_id,
+            "version": 1,
+        })
+
+    mindmap = models.Mindmap(
+        team_id=team_id,
+        project_id=data.project_id,
+        name=data.name,
+        content=default_content,
+        created_by=current_user.id,
+        updated_by=current_user.id,
+    )
+    db.add(mindmap)
+    db.commit()
+    db.refresh(mindmap)
+
+    mindmap = (
+        db.query(models.Mindmap)
+        .options(
+            joinedload(models.Mindmap.creator),
+            joinedload(models.Mindmap.updater),
+        )
+        .filter(models.Mindmap.id == mindmap.id)
+        .first()
+    )
+    return schemas.MindmapInfo.model_validate(mindmap)
+
+
+@router.put("/mindmaps/{map_id}", response_model=schemas.MindmapInfo, dependencies=[Depends(require_document)])
+def update_mindmap(
+    map_id: int,
+    data: schemas.MindmapUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    mindmap = db.query(models.Mindmap).filter(models.Mindmap.id == map_id).first()
+    if not mindmap:
+        raise HTTPException(status_code=404, detail="思维导图不存在")
+
+    team_id = _get_current_team_id(current_user, db)
+    if mindmap.team_id != team_id:
+        raise HTTPException(status_code=403, detail="无权访问该思维导图")
+
+    if data.name is not None:
+        mindmap.name = data.name
+    if data.project_id is not None:
+        if data.project_id == 0:
+            mindmap.project_id = None
+        else:
+            project = db.query(models.Project).filter(models.Project.id == data.project_id).first()
+            if not project or project.team_id != team_id:
+                raise HTTPException(status_code=404, detail="项目不存在")
+            mindmap.project_id = data.project_id
+    if data.content is not None:
+        mindmap.content = data.content
+    if data.thumbnail is not None:
+        mindmap.thumbnail = data.thumbnail
+
+    mindmap.updated_by = current_user.id
+    db.commit()
+    db.refresh(mindmap)
+
+    mindmap = (
+        db.query(models.Mindmap)
+        .options(
+            joinedload(models.Mindmap.creator),
+            joinedload(models.Mindmap.updater),
+        )
+        .filter(models.Mindmap.id == mindmap.id)
+        .first()
+    )
+    return schemas.MindmapInfo.model_validate(mindmap)
+
+
+@router.delete("/mindmaps/{map_id}", dependencies=[Depends(require_document)])
+def delete_mindmap(
+    map_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    mindmap = db.query(models.Mindmap).filter(models.Mindmap.id == map_id).first()
+    if not mindmap:
+        raise HTTPException(status_code=404, detail="思维导图不存在")
+
+    team_id = _get_current_team_id(current_user, db)
+    if mindmap.team_id != team_id:
+        raise HTTPException(status_code=403, detail="无权访问该思维导图")
+
+    db.delete(mindmap)
+    db.commit()
+    return {"status": "ok", "message": "已删除"}
 
 
 @router.get("/flowcharts", response_model=List[schemas.FlowchartListItem], dependencies=[Depends(require_document)])

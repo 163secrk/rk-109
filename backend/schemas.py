@@ -482,3 +482,47 @@ class FlowchartListItem(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class MindmapCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    project_id: Optional[int] = None
+    content: str = ""
+
+
+class MindmapUpdate(BaseModel):
+    name: Optional[str] = None
+    project_id: Optional[int] = None
+    content: Optional[str] = None
+    thumbnail: Optional[str] = None
+
+
+class MindmapInfo(BaseModel):
+    id: int
+    team_id: int
+    project_id: Optional[int] = None
+    name: str
+    content: str
+    thumbnail: str
+    creator: Optional[UserInfo] = None
+    updater: Optional[UserInfo] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class MindmapListItem(BaseModel):
+    id: int
+    team_id: int
+    project_id: Optional[int] = None
+    project: Optional[ProjectInfo] = None
+    name: str
+    thumbnail: str
+    creator: Optional[UserInfo] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True

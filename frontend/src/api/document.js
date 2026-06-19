@@ -55,3 +55,23 @@ export const updateFlowchartApi = (chartId, data) => {
 export const deleteFlowchartApi = (chartId) => {
   return request.delete(`/api/document/flowcharts/${chartId}`)
 }
+
+export const listMindmapsApi = (params) => {
+  return request.get('/api/document/mindmaps', { params })
+}
+
+export const getMindmapApi = (mapId) => {
+  return request.get(`/api/document/mindmaps/${mapId}`)
+}
+
+export const createMindmapApi = (data) => {
+  return request.post('/api/document/mindmaps', data)
+}
+
+export const updateMindmapApi = (mapId, data) => {
+  return request.put(`/api/document/mindmaps/${mapId}`, data)
+}
+
+export const deleteMindmapApi = (mapId) => {
+  return request.delete(`/api/document/mindmaps/${mapId}`)
+}

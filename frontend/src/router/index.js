@@ -69,6 +69,12 @@ const routes = [
         meta: { title: '思维导图 - 知汇', breadcrumb: ['文档协作', '思维导图'] },
       },
       {
+        path: 'document/mindmap/:mapId',
+        name: 'DocumentMindmapEditor',
+        component: () => import('../views/document/MindmapEditor.vue'),
+        meta: { title: '思维导图编辑 - 知汇', breadcrumb: ['文档协作', '思维导图', '编辑'] },
+      },
+      {
         path: 'document/flowchart',
         name: 'DocumentFlowchart',
         component: () => import('../views/document/Flowchart.vue'),
