@@ -1,4 +1,6 @@
 from typing import List, Optional
+from datetime import datetime
+import json
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 
@@ -471,7 +473,6 @@ def create_mindmap(
 
     default_content = data.content
     if not default_content:
-        import json
         root_id = f"root_{int(datetime.utcnow().timestamp() * 1000)}"
         default_content = json.dumps({
             "nodes": {
