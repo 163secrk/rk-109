@@ -330,3 +330,48 @@ class ChatMessage(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     sender = relationship("User")
+
+
+class FileFolder(Base):
+    __tablename__ = "file_folders"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    parent_id = Column(Integer, ForeignKey("file_folders.id"), nullable=True)
+    name = Column(String(255), nullable=False)
+    sort_order = Column(Integer, default=0)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    team = relationship("Team")
+    project = relationship("Project")
+    creator = relationship("User", foreign_keys=[created_by])
+    parent = relationship("FileFolder", remote_side=[id], back_populates="children")
+    children = relationship("FileFolder", back_populates="parent", cascade="all, delete-orphan")
+    files = relationship("FileItem", back_populates="folder", cascade="all, delete-orphan")
+
+
+class FileItem(Base):
+    __tablename__ = "file_items"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    folder_id = Column(Integer, ForeignKey("file_folders.id"), nullable=True)
+    name = Column(String(255), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    file_path = Column(String(500), nullable=False)
+    file_size = Column(Integer, default=0)
+    file_type = Column(String(50), default="")
+    mime_type = Column(String(100), default="")
+    sort_order = Column(Integer, default=0)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    team = relationship("Team")
+    project = relationship("Project")
+    folder = relationship("FileFolder", back_populates="files")
+    creator = relationship("User", foreign_keys=[created_by])

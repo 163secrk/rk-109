@@ -535,3 +535,65 @@ class MindmapListItem(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FileFolderCreate(BaseModel):
+    parent_id: Optional[int] = None
+    project_id: Optional[int] = None
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class FileFolderUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    parent_id: Optional[int] = None
+
+
+class FileFolderInfo(BaseModel):
+    id: int
+    team_id: int
+    project_id: Optional[int] = None
+    parent_id: Optional[int] = None
+    name: str
+    sort_order: int
+    creator: Optional[UserInfo] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class FileItemInfo(BaseModel):
+    id: int
+    team_id: int
+    project_id: Optional[int] = None
+    folder_id: Optional[int] = None
+    name: str
+    file_name: str
+    file_path: str
+    file_size: int
+    file_type: str
+    mime_type: str
+    sort_order: int
+    creator: Optional[UserInfo] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class FileListResponse(BaseModel):
+    folders: List[FileFolderInfo]
+    files: List[FileItemInfo]
+    breadcrumb: List[FileFolderInfo] = []
+
+
+class FileMoveRequest(BaseModel):
+    target_folder_id: Optional[int] = None
+    target_project_id: Optional[int] = None
+
+
+class FileSearchResponse(BaseModel):
+    folders: List[FileFolderInfo]
+    files: List[FileItemInfo]

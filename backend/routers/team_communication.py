@@ -1,15 +1,21 @@
 import json
 import asyncio
+import os
+import uuid
+import shutil
 from datetime import datetime
 from typing import Optional, List, Dict
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query, UploadFile, File
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func
 
 from auth import get_current_user, decode_token as auth_decode_token
 from permissions import PermissionChecker
 import models
+import schemas
 from database import get_db
+from config import settings
 
 router = APIRouter(prefix="/api/team", tags=["团队沟通"])
 
@@ -585,12 +591,678 @@ def get_chat_unread_count(
     }
 
 
-@router.get("/files")
-def files(
+def _get_current_team_id(user: models.User, db: Session) -> int:
+    member = (
+        db.query(models.TeamMember)
+        .filter(models.TeamMember.user_id == user.id, models.TeamMember.is_active == True)
+        .first()
+    )
+    if member:
+        return member.team_id
+    return None
+
+
+def _get_file_extension(filename: str) -> str:
+    ext = os.path.splitext(filename)[1].lower().lstrip(".")
+    return ext
+
+
+def _get_file_type(filename: str) -> str:
+    ext = _get_file_extension(filename)
+    image_exts = {"jpg", "jpeg", "png", "gif", "bmp", "webp", "svg", "ico"}
+    pdf_exts = {"pdf"}
+    doc_exts = {"doc", "docx", "odt", "rtf"}
+    xls_exts = {"xls", "xlsx", "csv", "ods"}
+    ppt_exts = {"ppt", "pptx", "odp"}
+    zip_exts = {"zip", "rar", "7z", "tar", "gz"}
+    video_exts = {"mp4", "avi", "mov", "wmv", "flv", "mkv", "webm"}
+    audio_exts = {"mp3", "wav", "flac", "aac", "ogg", "wma"}
+    code_exts = {"py", "js", "ts", "java", "c", "cpp", "h", "html", "css", "json", "xml", "yaml", "yml", "go", "rs", "php", "rb", "sh"}
+
+    if ext in image_exts:
+        return "image"
+    elif ext in pdf_exts:
+        return "pdf"
+    elif ext in doc_exts:
+        return "doc"
+    elif ext in xls_exts:
+        return "xls"
+    elif ext in ppt_exts:
+        return "ppt"
+    elif ext in zip_exts:
+        return "zip"
+    elif ext in video_exts:
+        return "video"
+    elif ext in audio_exts:
+        return "audio"
+    elif ext in code_exts:
+        return "code"
+    else:
+        return "other"
+
+
+def _build_folder_breadcrumb(db: Session, folder_id: Optional[int], team_id: int) -> List[dict]:
+    breadcrumb = []
+    current_id = folder_id
+    while current_id:
+        folder = (
+            db.query(models.FileFolder)
+            .filter(
+                and_(
+                    models.FileFolder.id == current_id,
+                    models.FileFolder.team_id == team_id,
+                )
+            )
+            .first()
+        )
+        if not folder:
+            break
+        breadcrumb.insert(0, {
+            "id": folder.id,
+            "name": folder.name,
+            "parent_id": folder.parent_id,
+        })
+        current_id = folder.parent_id
+    return breadcrumb
+
+
+def _ensure_project_folder(db: Session, team_id: int, project_id: int, current_user: models.User):
+    project = db.query(models.Project).filter(
+        and_(models.Project.id == project_id, models.Project.team_id == team_id)
+    ).first()
+    if not project:
+        return None
+
+    folder = (
+        db.query(models.FileFolder)
+        .filter(
+            and_(
+                models.FileFolder.team_id == team_id,
+                models.FileFolder.project_id == project_id,
+                models.FileFolder.parent_id.is_(None),
+            )
+        )
+        .first()
+    )
+
+    if not folder:
+        folder = models.FileFolder(
+            team_id=team_id,
+            project_id=project_id,
+            parent_id=None,
+            name=project.name,
+            created_by=current_user.id,
+        )
+        db.add(folder)
+        db.commit()
+        db.refresh(folder)
+
+    return folder
+
+
+require_files = PermissionChecker("team.files")
+
+
+@router.get("/files", dependencies=[Depends(require_files)])
+def list_files(
+    folder_id: Optional[int] = Query(None),
+    project_id: Optional[int] = Query(None),
     current_user: models.User = Depends(get_current_user),
-    _=Depends(PermissionChecker("team.files")),
+    db: Session = Depends(get_db),
 ):
-    return {"folders": [], "files": []}
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    if project_id and not folder_id:
+        project_folder = _ensure_project_folder(db, team_id, project_id, current_user)
+        if project_folder:
+            folder_id = project_folder.id
+
+    if folder_id:
+        folder = (
+            db.query(models.FileFolder)
+            .filter(
+                and_(
+                    models.FileFolder.id == folder_id,
+                    models.FileFolder.team_id == team_id,
+                )
+            )
+            .first()
+        )
+        if not folder:
+            raise HTTPException(status_code=404, detail="文件夹不存在")
+
+    folders = (
+        db.query(models.FileFolder)
+        .filter(
+            and_(
+                models.FileFolder.team_id == team_id,
+                models.FileFolder.parent_id == folder_id,
+            )
+        )
+        .order_by(models.FileFolder.sort_order.asc(), models.FileFolder.created_at.desc())
+        .all()
+    )
+
+    files = (
+        db.query(models.FileItem)
+        .filter(
+            and_(
+                models.FileItem.team_id == team_id,
+                models.FileItem.folder_id == folder_id,
+            )
+        )
+        .order_by(models.FileItem.sort_order.asc(), models.FileItem.created_at.desc())
+        .all()
+    )
+
+    breadcrumb = _build_folder_breadcrumb(db, folder_id, team_id)
+
+    return {
+        "folders": [schemas.FileFolderInfo.model_validate(f) for f in folders],
+        "files": [schemas.FileItemInfo.model_validate(f) for f in files],
+        "breadcrumb": breadcrumb,
+        "current_folder_id": folder_id,
+        "current_project_id": project_id,
+    }
+
+
+@router.post("/files/folders", response_model=schemas.FileFolderInfo, dependencies=[Depends(require_files)])
+def create_folder(
+    data: schemas.FileFolderCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    parent_id = data.parent_id
+    project_id = data.project_id
+
+    if parent_id:
+        parent = (
+            db.query(models.FileFolder)
+            .filter(
+                and_(
+                    models.FileFolder.id == parent_id,
+                    models.FileFolder.team_id == team_id,
+                )
+            )
+            .first()
+        )
+        if not parent:
+            raise HTTPException(status_code=404, detail="父文件夹不存在")
+        project_id = parent.project_id
+
+    if project_id and not parent_id:
+        _ensure_project_folder(db, team_id, project_id, current_user)
+
+    existing = (
+        db.query(models.FileFolder)
+        .filter(
+            and_(
+                models.FileFolder.team_id == team_id,
+                models.FileFolder.parent_id == parent_id,
+                models.FileFolder.name == data.name,
+            )
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="同名文件夹已存在")
+
+    folder = models.FileFolder(
+        team_id=team_id,
+        project_id=project_id,
+        parent_id=parent_id,
+        name=data.name,
+        created_by=current_user.id,
+    )
+    db.add(folder)
+    db.commit()
+    db.refresh(folder)
+
+    return schemas.FileFolderInfo.model_validate(folder)
+
+
+@router.put("/files/folders/{folder_id}", response_model=schemas.FileFolderInfo, dependencies=[Depends(require_files)])
+def update_folder(
+    folder_id: int,
+    data: schemas.FileFolderUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    folder = (
+        db.query(models.FileFolder)
+        .filter(
+            and_(
+                models.FileFolder.id == folder_id,
+                models.FileFolder.team_id == team_id,
+            )
+        )
+        .first()
+    )
+    if not folder:
+        raise HTTPException(status_code=404, detail="文件夹不存在")
+
+    if data.name is not None and data.name != folder.name:
+        existing = (
+            db.query(models.FileFolder)
+            .filter(
+                and_(
+                    models.FileFolder.team_id == team_id,
+                    models.FileFolder.parent_id == folder.parent_id,
+                    models.FileFolder.name == data.name,
+                    models.FileFolder.id != folder_id,
+                )
+            )
+            .first()
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail="同名文件夹已存在")
+        folder.name = data.name
+
+    if data.parent_id is not None and data.parent_id != folder.parent_id:
+        if data.parent_id == folder.id:
+            raise HTTPException(status_code=400, detail="不能移动到自身文件夹")
+
+        if data.parent_id is not None:
+            new_parent = (
+                db.query(models.FileFolder)
+                .filter(
+                    and_(
+                        models.FileFolder.id == data.parent_id,
+                        models.FileFolder.team_id == team_id,
+                    )
+                )
+                .first()
+            )
+            if not new_parent:
+                raise HTTPException(status_code=404, detail="目标文件夹不存在")
+
+            def _is_descendant(check_id, target_id):
+                current = target_id
+                while current is not None:
+                    if current == check_id:
+                        return True
+                    f = db.query(models.FileFolder).filter(models.FileFolder.id == current).first()
+                    if not f:
+                        break
+                    current = f.parent_id
+                return False
+
+            if _is_descendant(folder.id, data.parent_id):
+                raise HTTPException(status_code=400, detail="不能移动到子文件夹中")
+
+        folder.parent_id = data.parent_id
+
+    db.commit()
+    db.refresh(folder)
+    return schemas.FileFolderInfo.model_validate(folder)
+
+
+@router.delete("/files/folders/{folder_id}", dependencies=[Depends(require_files)])
+def delete_folder(
+    folder_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    folder = (
+        db.query(models.FileFolder)
+        .filter(
+            and_(
+                models.FileFolder.id == folder_id,
+                models.FileFolder.team_id == team_id,
+            )
+        )
+        .first()
+    )
+    if not folder:
+        raise HTTPException(status_code=404, detail="文件夹不存在")
+
+    def _collect_file_paths(folder_obj):
+        paths = []
+        for f in folder_obj.files:
+            paths.append(f.file_path)
+        for child in folder_obj.children:
+            paths.extend(_collect_file_paths(child))
+        return paths
+
+    file_paths = _collect_file_paths(folder)
+
+    db.delete(folder)
+    db.commit()
+
+    for path in file_paths:
+        abs_path = os.path.join(settings.UPLOAD_DIR, path)
+        if os.path.exists(abs_path):
+            try:
+                os.remove(abs_path)
+            except Exception:
+                pass
+
+    return {"ok": True}
+
+
+@router.post("/files/upload", response_model=List[schemas.FileItemInfo], dependencies=[Depends(require_files)])
+async def upload_files(
+    files: List[UploadFile] = File(...),
+    folder_id: Optional[int] = Query(None),
+    project_id: Optional[int] = Query(None),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    if project_id and not folder_id:
+        project_folder = _ensure_project_folder(db, team_id, project_id, current_user)
+        if project_folder:
+            folder_id = project_folder.id
+
+    if folder_id:
+        folder = (
+            db.query(models.FileFolder)
+            .filter(
+                and_(
+                    models.FileFolder.id == folder_id,
+                    models.FileFolder.team_id == team_id,
+                )
+            )
+            .first()
+        )
+        if not folder:
+            raise HTTPException(status_code=404, detail="文件夹不存在")
+        project_id = folder.project_id
+
+    team_dir = os.path.join(settings.UPLOAD_DIR, "files", str(team_id))
+    os.makedirs(team_dir, exist_ok=True)
+
+    created_files = []
+
+    for upload_file in files:
+        if not upload_file.filename:
+            continue
+
+        content = await upload_file.read()
+        if len(content) > settings.MAX_UPLOAD_SIZE:
+            continue
+
+        original_name = upload_file.filename
+        ext = os.path.splitext(original_name)[1]
+        file_uuid = str(uuid.uuid4())
+        storage_name = f"{file_uuid}{ext}"
+        relative_path = os.path.join("files", str(team_id), storage_name)
+        full_path = os.path.join(settings.UPLOAD_DIR, relative_path)
+
+        with open(full_path, "wb") as f:
+            f.write(content)
+
+        file_type = _get_file_type(original_name)
+        mime_type = upload_file.content_type or ""
+
+        base_name, file_ext = os.path.splitext(original_name)
+        final_name = original_name
+        counter = 1
+        while True:
+            existing = (
+                db.query(models.FileItem)
+                .filter(
+                    and_(
+                        models.FileItem.team_id == team_id,
+                        models.FileItem.folder_id == folder_id,
+                        models.FileItem.name == final_name,
+                    )
+                )
+                .first()
+            )
+            if not existing:
+                break
+            final_name = f"{base_name}({counter}){file_ext}"
+            counter += 1
+
+        file_item = models.FileItem(
+            team_id=team_id,
+            project_id=project_id,
+            folder_id=folder_id,
+            name=final_name,
+            file_name=storage_name,
+            file_path=relative_path.replace("\\", "/"),
+            file_size=len(content),
+            file_type=file_type,
+            mime_type=mime_type,
+            created_by=current_user.id,
+        )
+        db.add(file_item)
+        db.flush()
+        db.refresh(file_item)
+        created_files.append(file_item)
+
+    db.commit()
+    for f in created_files:
+        db.refresh(f)
+
+    return [schemas.FileItemInfo.model_validate(f) for f in created_files]
+
+
+@router.put("/files/{file_id}", response_model=schemas.FileItemInfo, dependencies=[Depends(require_files)])
+def update_file(
+    file_id: int,
+    data: schemas.FileFolderUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    file_item = (
+        db.query(models.FileItem)
+        .filter(
+            and_(
+                models.FileItem.id == file_id,
+                models.FileItem.team_id == team_id,
+            )
+        )
+        .first()
+    )
+    if not file_item:
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    if data.name is not None and data.name != file_item.name:
+        existing = (
+            db.query(models.FileItem)
+            .filter(
+                and_(
+                    models.FileItem.team_id == team_id,
+                    models.FileItem.folder_id == file_item.folder_id,
+                    models.FileItem.name == data.name,
+                    models.FileItem.id != file_id,
+                )
+            )
+            .first()
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail="同名文件已存在")
+        file_item.name = data.name
+
+    if data.parent_id is not None and data.parent_id != file_item.folder_id:
+        if data.parent_id is not None:
+            new_parent = (
+                db.query(models.FileFolder)
+                .filter(
+                    and_(
+                        models.FileFolder.id == data.parent_id,
+                        models.FileFolder.team_id == team_id,
+                    )
+                )
+                .first()
+            )
+            if not new_parent:
+                raise HTTPException(status_code=404, detail="目标文件夹不存在")
+        file_item.folder_id = data.parent_id
+
+    db.commit()
+    db.refresh(file_item)
+    return schemas.FileItemInfo.model_validate(file_item)
+
+
+@router.delete("/files/{file_id}", dependencies=[Depends(require_files)])
+def delete_file(
+    file_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    file_item = (
+        db.query(models.FileItem)
+        .filter(
+            and_(
+                models.FileItem.id == file_id,
+                models.FileItem.team_id == team_id,
+            )
+        )
+        .first()
+    )
+    if not file_item:
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    file_path = file_item.file_path
+    db.delete(file_item)
+    db.commit()
+
+    abs_path = os.path.join(settings.UPLOAD_DIR, file_path)
+    if os.path.exists(abs_path):
+        try:
+            os.remove(abs_path)
+        except Exception:
+            pass
+
+    return {"ok": True}
+
+
+@router.get("/files/{file_id}/download", dependencies=[Depends(require_files)])
+def download_file(
+    file_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    file_item = (
+        db.query(models.FileItem)
+        .filter(
+            and_(
+                models.FileItem.id == file_id,
+                models.FileItem.team_id == team_id,
+            )
+        )
+        .first()
+    )
+    if not file_item:
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    abs_path = os.path.join(settings.UPLOAD_DIR, file_item.file_path)
+    if not os.path.exists(abs_path):
+        raise HTTPException(status_code=404, detail="文件已不存在")
+
+    return FileResponse(
+        abs_path,
+        media_type=file_item.mime_type or "application/octet-stream",
+        filename=file_item.name,
+    )
+
+
+@router.get("/files/search", response_model=schemas.FileSearchResponse, dependencies=[Depends(require_files)])
+def search_files(
+    keyword: str = Query(..., min_length=1),
+    project_id: Optional[int] = Query(None),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    keyword_pattern = f"%{keyword}%"
+
+    folder_query = db.query(models.FileFolder).filter(
+        and_(
+            models.FileFolder.team_id == team_id,
+            models.FileFolder.name.like(keyword_pattern),
+        )
+    )
+    if project_id:
+        folder_query = folder_query.filter(models.FileFolder.project_id == project_id)
+    folders = folder_query.order_by(models.FileFolder.created_at.desc()).all()
+
+    file_query = db.query(models.FileItem).filter(
+        and_(
+            models.FileItem.team_id == team_id,
+            models.FileItem.name.like(keyword_pattern),
+        )
+    )
+    if project_id:
+        file_query = file_query.filter(models.FileItem.project_id == project_id)
+    files = file_query.order_by(models.FileItem.created_at.desc()).all()
+
+    return {
+        "folders": [schemas.FileFolderInfo.model_validate(f) for f in folders],
+        "files": [schemas.FileItemInfo.model_validate(f) for f in files],
+    }
+
+
+@router.get("/files/folder-tree", dependencies=[Depends(require_files)])
+def get_folder_tree(
+    exclude_folder_id: Optional[int] = Query(None),
+    project_id: Optional[int] = Query(None),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    team_id = _get_current_team_id(current_user, db)
+    if not team_id:
+        raise HTTPException(status_code=403, detail="您还没有加入任何团队")
+
+    def _build_children(parent_id):
+        query = db.query(models.FileFolder).filter(
+            and_(
+                models.FileFolder.team_id == team_id,
+                models.FileFolder.parent_id == parent_id,
+            )
+        )
+        if project_id and parent_id is None:
+            query = query.filter(models.FileFolder.project_id == project_id)
+        children = query.order_by(models.FileFolder.name.asc()).all()
+
+        result = []
+        for folder in children:
+            if exclude_folder_id and (folder.id == exclude_folder_id):
+                continue
+            result.append({
+                "id": folder.id,
+                "name": folder.name,
+                "parent_id": folder.parent_id,
+                "children": _build_children(folder.id),
+            })
+        return result
+
+    return {"folders": _build_children(None)}
 
 
 @router.websocket("/ws/chat")
